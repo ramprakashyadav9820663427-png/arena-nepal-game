@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { UserWallet, TabType } from '@/types/game';
+import { UserWallet, TabType } from '../../types/game';
 import AuthModal from '../AuthModal';
 
 interface NavbarProps {
