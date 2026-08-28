@@ -17,16 +17,15 @@ export default function AdminPanel() {
   }, []);
 
   // Check if the logged-in user is an admin
-  const async function checkAdmin() {
+  const checkAdmin = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
-        router.push('/'); // अगर लॉगिन नहीं है तो होमपेज भेज दो
+        router.push('/'); 
         return;
       }
 
-      // profiles टेबल से चेक करो कि is_admin true है या नहीं
       const { data, error } = await supabase
         .from('profiles')
         .select('is_admin')
@@ -44,7 +43,7 @@ export default function AdminPanel() {
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   // Diamond Top-up Logic for Admin
   const handleTopUp = async (e: React.FormEvent) => {
@@ -57,7 +56,6 @@ export default function AdminPanel() {
     }
 
     try {
-      // 1. उस यूजर को ढूंढो जिसका ईमेल डाला गया है
       const { data: targetUser, error: fetchError } = await supabase
         .from('profiles')
         .select('id, diamonds')
@@ -69,7 +67,6 @@ export default function AdminPanel() {
         return;
       }
 
-      // 2. पुराने डायमंड में नए डायमंड जोड़ो
       const newTotalDiamonds = (targetUser.diamonds || 0) + parseInt(diamondsToAdd);
 
       const { error: updateError } = await supabase
