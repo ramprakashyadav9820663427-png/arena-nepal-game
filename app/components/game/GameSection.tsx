@@ -2,18 +2,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 interface UserWallet {
-  redDiamonds?: number;
-  whiteDiamonds?: number;
-  winningCash?: number;
   [key: string]: any;
 }
 
-interface NeonDodgeGameProps {
+interface GameSectionProps {
   wallet?: UserWallet;
-  setWallet?: React.Dispatch<React.SetStateAction<UserWallet>>;
+  setWallet?: React.Dispatch<React.SetStateAction<UserWallet>> | any;
 }
 
-export default function NeonDodgeGame({ wallet, setWallet }: NeonDodgeGameProps) {
+export default function GameSection({ wallet, setWallet }: GameSectionProps) {
   const [gameState, setGameState] = useState<'IDLE' | 'PLAYING' | 'GAMEOVER'>(
     'IDLE'
   );
