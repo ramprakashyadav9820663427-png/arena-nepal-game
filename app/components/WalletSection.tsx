@@ -1,32 +1,80 @@
 'use client';
 import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase'; // सुनिश्चित कर ले कि यह पाथ सही हो
 
 export default function WalletPage() {
   const [activeTab, setActiveTab] = useState<
     'cash' | 'white' | 'red' | 'history'
   >('cash');
 
-  // Profile States (Fresh Start / Empty Defaults)
+  // Profile States
   const [userName, setUserName] = useState('New Player');
   const [gameUid, setGameUid] = useState('#AN-000000');
+  const [userMobile, setUserMobile] = useState('No Mobile Added'); // 📱 New Mobile State
   const [redDiamonds, setRedDiamonds] = useState(0);
   const [whiteDiamonds, setWhiteDiamonds] = useState(0);
   const [winningCash, setWinningCash] = useState(0);
 
-  // Load actual user stats from localStorage on mount
+  // Load actual user stats from Supabase / localStorage on mount
   useEffect(() => {
     const savedName = localStorage.getItem('arena_user_name');
     const savedUid = localStorage.getItem('arena_user_uid');
+    const savedMobile = localStorage.getItem('arena_user_mobile');
     const savedWhite = localStorage.getItem('arena_white_diamonds');
     const savedRed = localStorage.getItem('arena_red_diamonds');
     const savedCash = localStorage.getItem('arena_winning_cash');
 
     if (savedName) setUserName(savedName);
-    if (savedUid) setGameUid(savedUid);
+    if (savedUid) {
+      setGameUid(savedUid);
+      fetchUserData(savedUid);
+    }
+    if (savedMobile) setUserMobile(savedMobile);
     if (savedWhite) setWhiteDiamonds(Number(savedWhite));
     if (savedRed) setRedDiamonds(Number(savedRed));
     if (savedCash) setWinningCash(Number(savedCash));
   }, []);
+
+  // Fetch real-time data from Supabase profiles & history
+  const fetchUserData = async (uid: string) => {
+    try {
+      // Fetch Profile Data
+      const { data: profileData } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_uid', uid)
+        .single();
+
+      if (profileData) {
+        setRedDiamonds(profileData.red_diamonds || 0);
+        setWinningCash(profileData.winning_cash || 0);
+        setUserName(profileData.username || userName);
+        if (profileData.mobile_number) {
+          setUserMobile(profileData.mobile_number);
+          localStorage.setItem('arena_user_mobile', profileData.mobile_number);
+        }
+      }
+
+      // Fetch Withdraw History
+      const { data: historyData } = await supabase
+        .from('withdraw_requests')
+        .select('*')
+        .eq('user_uid', uid)
+        .order('created_at', { ascending: false });
+
+      if (historyData) {
+        const formattedHistory = historyData.map((item) => ({
+          type: 'Withdraw Request',
+          details: `NPR ${item.amount} via eSewa (${item.esewa_id})`,
+          date: new Date(item.created_at).toLocaleDateString(),
+          status: item.status,
+        }));
+        setHistoryList(formattedHistory);
+      }
+    } catch (error) {
+      console.error('Error fetching user data:', error);
+    }
+  };
 
   // Withdraw Form States
   const [esewaId, setEsewaId] = useState('');
@@ -44,18 +92,45 @@ export default function WalletPage() {
     Array<{ type: string; details: string; date: string; status: string }>
   >([]);
 
-  // Edit Profile Handler
-  const handleEditProfile = () => {
-    const newName = prompt('Enter your new profile name:', userName);
-    if (newName && newName.trim() !== '') {
-      const updated = newName.trim();
-      setUserName(updated);
-      localStorage.setItem('arena_user_name', updated);
-    }
+  // 📋 Copy UID Function
+  const handleCopyUid = () => {
+    navigator.clipboard.writeText(gameUid);
+    alert(`UID Copied: ${gameUid}`);
   };
 
-  // Withdraw Submit Handler
-  const handleWithdrawSubmit = (e: React.FormEvent) => {
+  // ✏️ Edit Profile Handler (Name & Mobile Number)
+  const handleEditProfile = async () => {
+    const newName = prompt('Enter your new profile name:', userName);
+    if (!newName || newName.trim() === '') return;
+
+    const newMobile = prompt(
+      'Enter your Mobile Number (eSewa / Contact):',
+      userMobile === 'No Mobile Added' ? '' : userMobile
+    );
+
+    const updatedName = newName.trim();
+    const updatedMobile = newMobile ? newMobile.trim() : userMobile;
+
+    setUserName(updatedName);
+    setUserMobile(updatedMobile);
+
+    localStorage.setItem('arena_user_name', updatedName);
+    localStorage.setItem('arena_user_mobile', updatedMobile);
+
+    // Update in Supabase profiles (Note: ensure mobile_number column exists in your profiles table)
+    await supabase
+      .from('profiles')
+      .update({
+        username: updatedName,
+        mobile_number: updatedMobile,
+      })
+      .eq('user_uid', gameUid);
+
+    alert('Profile updated successfully!');
+  };
+
+  // Withdraw Submit Handler (Saves to Supabase Database)
+  const handleWithdrawSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = Number(withdrawAmount);
 
@@ -64,14 +139,35 @@ export default function WalletPage() {
       return;
     }
 
-    const whatsappNumber = '9779820663427';
-    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AeSewa Number: ${esewaId}%0AeSewa Holder: ${esewaName}%0AAmount: NPR ${withdrawAmount}`;
+    // 1. Save Request to Supabase withdraw_requests table
+    const { error } = await supabase.from('withdraw_requests').insert([
+      {
+        user_uid: gameUid,
+        username: userName,
+        esewa_id: esewaId,
+        esewa_name: esewaName,
+        amount: amountNum,
+        status: 'Processing',
+      },
+    ]);
 
-    // Deduct cash after request
+    if (error) {
+      alert('Failed to submit request. Please try again.');
+      console.error(error);
+      return;
+    }
+
+    // 2. Deduct cash locally and in database
     const updatedCash = winningCash - amountNum;
     setWinningCash(updatedCash);
     localStorage.setItem('arena_winning_cash', updatedCash.toString());
 
+    await supabase
+      .from('profiles')
+      .update({ winning_cash: updatedCash })
+      .eq('user_uid', gameUid);
+
+    // 3. Add to local history list
     setHistoryList((prev) => [
       {
         type: 'Withdraw Request',
@@ -82,6 +178,9 @@ export default function WalletPage() {
       ...prev,
     ]);
 
+    // 4. Open WhatsApp
+    const whatsappNumber = '9779820663427';
+    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AeSewa Number: ${esewaId}%0AeSewa Holder: ${esewaName}%0AAmount: NPR ${withdrawAmount}`;
     window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
   };
 
@@ -131,13 +230,21 @@ export default function WalletPage() {
         </button>
       </div>
 
-      {/* Profile Card */}
+      {/* Profile Card with Copy UID & Mobile Number Support */}
       <div className="w-full max-w-md bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-sm font-bold">{userName}</h2>
-          <p className="text-[10px] text-gray-400">UID: {gameUid}</p>
-          <p className="text-[10px] text-red-400 font-semibold mt-1">
-            Red Diamonds: {redDiamonds} 🔴
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-[10px] text-gray-400">UID: {gameUid}</p>
+            <button
+              onClick={handleCopyUid}
+              className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[9px] font-bold rounded hover:bg-cyan-500 hover:text-black transition-all"
+            >
+              📋 Copy
+            </button>
+          </div>
+          <p className="text-[10px] text-green-400 font-semibold mt-1">
+            📱 Mobile: {userMobile}
           </p>
         </div>
         <button
@@ -148,7 +255,7 @@ export default function WalletPage() {
         </button>
       </div>
 
-      {/* 3 Balance Boxes Cards (Cash, White, Red) */}
+      {/* 3 Balance Boxes Cards */}
       <div className="w-full max-w-md grid grid-cols-3 gap-2 mb-4">
         <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center">
           <p className="text-[9px] text-gray-400 font-bold">CASH</p>
@@ -223,7 +330,7 @@ export default function WalletPage() {
               />
               <input
                 type="text"
-                placeholder="Your eSewa Mobile Number (Must be yours)"
+                placeholder="Your eSewa Mobile Number"
                 value={esewaId}
                 onChange={(e) => setEsewaId(e.target.value)}
                 className="bg-black border border-gray-800 text-white p-2.5 rounded-xl text-xs"
@@ -248,7 +355,7 @@ export default function WalletPage() {
         </div>
       )}
 
-      {/* TAB CONTENT: WHITE DIAMONDS & EXCHANGE */}
+      {/* TAB CONTENT: WHITE DIAMONDS */}
       {activeTab === 'white' && (
         <div className="w-full max-w-md bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center">
           <h3 className="text-xs font-bold text-gray-400">
@@ -326,7 +433,13 @@ export default function WalletPage() {
                     <p className="text-[10px] text-gray-300">{item.details}</p>
                     <p className="text-[9px] text-gray-500">{item.date}</p>
                   </div>
-                  <span className="text-[10px] bg-green-500/20 text-green-400 border border-green-500/30 px-2 py-1 rounded font-bold">
+                  <span
+                    className={`text-[10px] px-2 py-1 rounded font-bold border ${
+                      item.status === 'Success'
+                        ? 'bg-green-500/20 text-green-400 border-green-500/30'
+                        : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+                    }`}
+                  >
                     {item.status}
                   </span>
                 </div>
@@ -393,8 +506,8 @@ export default function WalletPage() {
                       💬 Customer Support
                     </p>
                     <p className="text-[11px] text-gray-300 mb-3">
-                      Need help with withdrawal, deposits, or game queries?
-                      Contact our official support team directly on WhatsApp.
+                      Need help with withdrawal or deposits? Contact our support
+                      team on WhatsApp.
                     </p>
                     <button
                       onClick={() =>
@@ -410,31 +523,23 @@ export default function WalletPage() {
                   </div>
                 </div>
               )}
-
               {settingTab === 'terms' && (
                 <div className="space-y-2 text-[11px] text-gray-300 leading-relaxed">
                   <p className="font-bold text-yellow-400">
                     Terms & Conditions
                   </p>
                   <p>
-                    1. <b>White Diamonds & Exchange:</b> White Diamonds are
-                    earned by playing games. You can exchange 2,00,000 White
-                    Diamonds for 100 Red Diamonds.
-                  </p>
-                  <p>
-                    2. <b>Daily Tournaments:</b> Daily tournaments run between
-                    6:00 PM and 12:00 Midnight.
+                    1. <b>White Diamonds:</b> Earned by playing games. Exchange
+                    2,00,000 for 100 Red Diamonds.
                   </p>
                 </div>
               )}
-
               {settingTab === 'about' && (
                 <div className="space-y-2 text-[11px] text-gray-300 leading-relaxed">
                   <p className="font-bold text-cyan-400">About Arena Nepal</p>
                   <p>
-                    Arena Nepal is the premier competitive mobile gaming and
-                    esports tournament platform built specifically for gamers in
-                    Nepal.
+                    Arena Nepal is the premier competitive esports platform for
+                    gamers in Nepal.
                   </p>
                 </div>
               )}

@@ -19,14 +19,17 @@ export default function NeonDodgeGame() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const requestRef = useRef<number>(0);
 
-  // Game entities refs
-  const playerRef = useRef({ x: 175, y: 350, size: 20 });
+  // Game entities refs (player size & position)
+  const playerRef = useRef({ x: 150, y: 315, radius: 14 });
   const obstaclesRef = useRef<
     { x: number; y: number; size: number; speed: number }[]
   >([]);
   const collectibleDiamondsRef = useRef<
     { x: number; y: number; value: number }[]
   >([]);
+
+  // Movement direction ref for continuous smooth sliding
+  const moveDirectionRef = useRef<'LEFT' | 'RIGHT' | null>(null);
 
   // Function to sync and check cooldowns from localStorage securely
   const checkAndUpdateCooldowns = () => {
@@ -103,9 +106,10 @@ export default function NeonDodgeGame() {
     setTimeLeft(120);
     setIsDoubleRewarded(false);
     setHasSyncedWallet(false);
-    playerRef.current = { x: 175, y: 350, size: 20 };
+    playerRef.current = { x: 160, y: 315, radius: 14 };
     obstaclesRef.current = [];
     collectibleDiamondsRef.current = [];
+    moveDirectionRef.current = null;
   };
 
   // Handle Double Diamonds with 15-Minute (900s) Cooldown
@@ -163,10 +167,11 @@ export default function NeonDodgeGame() {
 
     setHasSyncedWallet(false);
     obstaclesRef.current = [];
+    moveDirectionRef.current = null;
     alert('✨ Revived successfully! Continue playing!');
   };
 
-  // Main Game Loop
+  // Main Game Loop with Strict Balloon Collision & Boundary Check
   useEffect(() => {
     if (gameState !== 'PLAYING') return;
 
@@ -194,6 +199,16 @@ export default function NeonDodgeGame() {
         });
       }
 
+      // Strict Wall Collision / Boundary Check: Balloon cannot cross left or right walls
+      const p = playerRef.current;
+      const speed = 7.5;
+      if (moveDirectionRef.current === 'LEFT') {
+        p.x = Math.max(p.radius + 4, p.x - speed);
+      } else if (moveDirectionRef.current === 'RIGHT') {
+        p.x = Math.min(canvas.width - p.radius - 4, p.x + speed);
+      }
+      p.y = 315; // Locked Y coordinate inside game area
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       ctx.strokeStyle =
@@ -206,16 +221,18 @@ export default function NeonDodgeGame() {
         ctx.stroke();
       }
 
-      const baseSpawnChance = 0.03 + layer * 0.005;
+      // 0.4x increased speed and optimized spawn rate
+      const baseSpawnChance = 0.025 + layer * 0.0035;
       const spawnChance =
-        layer === 1 ? baseSpawnChance : baseSpawnChance * 0.65;
+        layer === 1 ? baseSpawnChance * 0.85 : baseSpawnChance;
 
       if (Math.random() < spawnChance) {
+        const obstacleSpeed = 2.3 + layer * 0.8;
         obstaclesRef.current.push({
-          x: Math.random() * (canvas.width - 20),
-          y: -20,
-          size: 15 + Math.random() * 10,
-          speed: 3 + layer * 1.0,
+          x: Math.random() * (canvas.width - 25),
+          y: -25,
+          size: 16 + Math.random() * 8,
+          speed: obstacleSpeed,
         });
       }
 
@@ -223,10 +240,11 @@ export default function NeonDodgeGame() {
         collectibleDiamondsRef.current.push({
           x: Math.random() * (canvas.width - 20),
           y: -20,
-          value: 2, // यहाँ मान (value) को फिक्स करके 2 कर दिया गया है
+          value: 2,
         });
       }
 
+      // Draw obstacles (Red blocks) & collision check with balloon
       ctx.fillStyle = '#ff0055';
       obstaclesRef.current.forEach((obs, index) => {
         obs.y += obs.speed;
@@ -234,14 +252,16 @@ export default function NeonDodgeGame() {
         ctx.shadowColor = '#ff0055';
         ctx.fillRect(obs.x, obs.y, obs.size, obs.size);
 
-        const p = playerRef.current;
-        if (
-          p.x < obs.x + obs.size &&
-          p.x + p.size > obs.x &&
-          p.y < obs.y + obs.size &&
-          p.y + p.size > obs.y
-        ) {
+        // Circle-to-Box collision detection
+        const closestX = Math.max(obs.x, Math.min(p.x, obs.x + obs.size));
+        const closestY = Math.max(obs.y, Math.min(p.y, obs.y + obs.size));
+        const distX = p.x - closestX;
+        const distY = p.y - closestY;
+        const distance = Math.hypot(distX, distY);
+
+        if (distance < p.radius) {
           setGameState('GAMEOVER');
+          moveDirectionRef.current = null;
 
           setHasSyncedWallet((prevSynced) => {
             if (!prevSynced && diamonds > 0) {
@@ -257,6 +277,7 @@ export default function NeonDodgeGame() {
         }
       });
 
+      // Draw collectible diamonds
       ctx.fillStyle = '#00ffff';
       collectibleDiamondsRef.current.forEach((dia, index) => {
         dia.y += 3.5;
@@ -266,12 +287,8 @@ export default function NeonDodgeGame() {
         ctx.arc(dia.x + 10, dia.y + 10, 8, 0, Math.PI * 2);
         ctx.fill();
 
-        const p = playerRef.current;
-        const dist = Math.hypot(
-          p.x + 10 - (dia.x + 10),
-          p.y + 10 - (dia.y + 10)
-        );
-        if (dist < p.size / 2 + 10) {
+        const dist = Math.hypot(p.x - (dia.x + 10), p.y - (dia.y + 10));
+        if (dist < p.radius + 8) {
           setDiamonds((d) => d + dia.value);
           collectibleDiamondsRef.current.splice(index, 1);
         }
@@ -283,12 +300,54 @@ export default function NeonDodgeGame() {
 
       ctx.shadowBlur = 0;
 
-      const p = playerRef.current;
-      ctx.fillStyle = '#00ffcc';
-      ctx.shadowBlur = 12;
+      // Draw Cyan Balloon with String & Knot
+      ctx.save();
+      ctx.shadowBlur = 15;
       ctx.shadowColor = '#00ffcc';
-      ctx.fillRect(p.x, p.y, p.size, p.size);
-      ctx.shadowBlur = 0;
+
+      // Balloon Body (Oval/Teardrop Shape)
+      ctx.fillStyle = '#00ffcc';
+      ctx.beginPath();
+      ctx.ellipse(p.x, p.y, p.radius, p.radius * 1.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Balloon Highlight (Glossy effect)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.beginPath();
+      ctx.ellipse(
+        p.x - 4,
+        p.y - 5,
+        p.radius * 0.3,
+        p.radius * 0.5,
+        Math.PI / 4,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+
+      // Balloon Knot
+      ctx.fillStyle = '#00b399';
+      ctx.beginPath();
+      ctx.moveTo(p.x - 3, p.y + p.radius * 1.2);
+      ctx.lineTo(p.x + 3, p.y + p.radius * 1.2);
+      ctx.lineTo(p.x, p.y + p.radius * 1.2 + 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Balloon String
+      ctx.strokeStyle = '#00ffcc';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y + p.radius * 1.2 + 4);
+      ctx.quadraticCurveTo(
+        p.x + 6,
+        p.y + p.radius * 1.2 + 12,
+        p.x,
+        p.y + p.radius * 1.2 + 20
+      );
+      ctx.stroke();
+
+      ctx.restore();
 
       requestRef.current = requestAnimationFrame(updateGame);
     };
@@ -296,20 +355,6 @@ export default function NeonDodgeGame() {
     requestRef.current = requestAnimationFrame(updateGame);
     return () => cancelAnimationFrame(requestRef.current);
   }, [gameState, layer, diamonds]);
-
-  const handleTouchMove = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
-  ) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const clientX =
-      'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    const x = clientX - rect.left;
-    if (x >= 0 && x <= canvas.width - playerRef.current.size) {
-      playerRef.current.x = x;
-    }
-  };
 
   return (
     <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-4 flex flex-col items-center shadow-2xl relative overflow-hidden select-none">
@@ -331,15 +376,14 @@ export default function NeonDodgeGame() {
       </div>
 
       {/* Game Canvas Box */}
-      <div className="relative w-[320px] h-[420px] bg-black rounded-2xl border border-cyan-500/30 overflow-hidden flex flex-col items-center justify-center">
+      <div className="relative w-[320px] h-[380px] bg-black rounded-2xl border border-cyan-500/30 overflow-hidden flex flex-col items-center justify-center">
         {gameState === 'IDLE' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm z-10 p-4 text-center">
             <h2 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400 mb-1">
               NEON SHERPA RUSH
             </h2>
             <p className="text-[11px] text-gray-300 mb-4">
-              Collect scattered diamonds with risk, dodge 35% reduced red
-              stones, survive 7 layers!
+              Control the neon balloon within the game walls!
             </p>
             <button
               onClick={startGame}
@@ -401,15 +445,40 @@ export default function NeonDodgeGame() {
         <canvas
           ref={canvasRef}
           width={320}
-          height={420}
-          onMouseMove={handleTouchMove}
-          onTouchMove={handleTouchMove}
-          className="cursor-crosshair touch-none"
+          height={380}
+          className="touch-none"
         />
       </div>
 
+      {/* Control Buttons */}
+      <div className="w-full flex justify-between items-center gap-4 mt-3 px-2">
+        <button
+          onMouseDown={() => (moveDirectionRef.current = 'LEFT')}
+          onMouseUp={() => (moveDirectionRef.current = null)}
+          onMouseLeave={() => (moveDirectionRef.current = null)}
+          onTouchStart={() => (moveDirectionRef.current = 'LEFT')}
+          onTouchEnd={() => (moveDirectionRef.current = null)}
+          className="flex-1 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-lg rounded-2xl shadow-lg border border-purple-400/40 transform active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer select-none"
+        >
+          <span className="text-xl">◄</span>
+          <span className="text-xs uppercase tracking-wider">Left</span>
+        </button>
+
+        <button
+          onMouseDown={() => (moveDirectionRef.current = 'RIGHT')}
+          onMouseUp={() => (moveDirectionRef.current = null)}
+          onMouseLeave={() => (moveDirectionRef.current = null)}
+          onTouchStart={() => (moveDirectionRef.current = 'RIGHT')}
+          onTouchEnd={() => (moveDirectionRef.current = null)}
+          className="flex-1 py-3.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-lg rounded-2xl shadow-lg border border-purple-400/40 transform active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer select-none"
+        >
+          <span className="text-xs uppercase tracking-wider">Right</span>
+          <span className="text-xl">►</span>
+        </button>
+      </div>
+
       <p className="text-[10px] text-gray-400 mt-2 text-center">
-        💡 Drag to collect diamonds safely! Wallet updates automatically.
+        💡 Balloon style active with strict wall collision limits!
       </p>
     </div>
   );
