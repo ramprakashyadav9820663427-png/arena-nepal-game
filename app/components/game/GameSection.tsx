@@ -2,10 +2,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 interface UserWallet {
-  cash?: number;
-  winning_cash?: number;
-  white_diamonds?: number;
-  red_diamonds?: number;
+  redDiamonds?: number;
+  whiteDiamonds?: number;
+  winningCash?: number;
   [key: string]: any;
 }
 
