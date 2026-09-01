@@ -2,6 +2,18 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase'; // सुनिश्चित कर ले कि यह पाथ सही हो
 
+interface UserWallet {
+  redDiamonds?: number;
+  whiteDiamonds?: number;
+  winningCash?: number;
+  [key: string]: any;
+}
+
+interface WalletSectionProps {
+  wallet?: UserWallet;
+  setWallet?: React.Dispatch<React.SetStateAction<UserWallet>> | any;
+}
+
 interface HistoryItem {
   type: string;
   details: string;
@@ -9,7 +21,7 @@ interface HistoryItem {
   status: string;
 }
 
-export default function WalletPage() {
+export default function WalletSection({ wallet, setWallet }: WalletSectionProps) {
   const [activeTab, setActiveTab] = useState<
     'cash' | 'white' | 'red' | 'history'
   >('cash');
@@ -221,9 +233,9 @@ export default function WalletPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-white flex flex-col items-center pb-28 px-4 pt-4 select-none relative">
+    <div className="w-full max-w-md mx-auto text-white flex flex-col items-center pb-20 px-2 select-none relative">
       {/* Top Bar with Title & Setting Icon */}
-      <div className="w-full max-w-md flex items-center justify-between mb-4">
+      <div className="w-full flex items-center justify-between mb-4">
         <h1 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
           WALLET & PROFILE
         </h1>
@@ -236,7 +248,7 @@ export default function WalletPage() {
       </div>
 
       {/* Profile Card with Copy UID & Mobile Number Support */}
-      <div className="w-full max-w-md bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex items-center justify-between">
+      <div className="w-full bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex items-center justify-between">
         <div>
           <h2 className="text-sm font-bold">{userName}</h2>
           <div className="flex items-center gap-2 mt-1">
@@ -261,7 +273,7 @@ export default function WalletPage() {
       </div>
 
       {/* 3 Balance Boxes Cards */}
-      <div className="w-full max-w-md grid grid-cols-3 gap-2 mb-4">
+      <div className="w-full grid grid-cols-3 gap-2 mb-4">
         <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center">
           <p className="text-[9px] text-gray-400 font-bold">CASH</p>
           <p className="text-xs font-black text-green-400 mt-1">
@@ -283,7 +295,7 @@ export default function WalletPage() {
       </div>
 
       {/* Sub Navigation Tabs */}
-      <div className="w-full max-w-md grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl mb-4">
+      <div className="w-full grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl mb-4">
         {(['cash', 'white', 'red', 'history'] as const).map((tab) => (
           <button
             key={tab}
@@ -301,7 +313,7 @@ export default function WalletPage() {
 
       {/* TAB CONTENT: CASH & WITHDRAW */}
       {activeTab === 'cash' && (
-        <div className="w-full max-w-md flex flex-col gap-4">
+        <div className="w-full flex flex-col gap-4">
           <div className="bg-gray-900/80 border border-gray-800 p-4 rounded-2xl">
             <h3 className="text-xs font-bold text-gray-400">
               WINNING CASH BALANCE
@@ -362,7 +374,7 @@ export default function WalletPage() {
 
       {/* TAB CONTENT: WHITE DIAMONDS */}
       {activeTab === 'white' && (
-        <div className="w-full max-w-md bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center">
+        <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center">
           <h3 className="text-xs font-bold text-gray-400">
             WHITE DIAMOND BALANCE
           </h3>
@@ -385,7 +397,7 @@ export default function WalletPage() {
 
       {/* TAB CONTENT: RED DIAMONDS WHATSAPP TOP-UP */}
       {activeTab === 'red' && (
-        <div className="w-full max-w-md flex flex-col gap-3">
+        <div className="w-full flex flex-col gap-3">
           <h3 className="text-xs font-bold text-pink-400">
             BUY RED DIAMONDS VIA WHATSAPP
           </h3>
@@ -418,7 +430,7 @@ export default function WalletPage() {
 
       {/* TAB CONTENT: HISTORY */}
       {activeTab === 'history' && (
-        <div className="w-full max-w-md bg-gray-900/80 border border-gray-800 p-4 rounded-2xl">
+        <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl">
           <h3 className="text-xs font-bold text-gray-400 mb-3">
             TRANSACTION HISTORY
           </h3>
