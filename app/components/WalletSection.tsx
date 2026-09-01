@@ -2,38 +2,39 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase'; // सुनिश्चित कर ले कि यह पाथ सही हो
 
+interface HistoryItem {
+  type: string;
+  details: string;
+  date: string;
+  status: string;
+}
+
 export default function WalletPage() {
   const [activeTab, setActiveTab] = useState<
     'cash' | 'white' | 'red' | 'history'
   >('cash');
 
   // Profile States
-  const [userName, setUserName] = useState('New Player');
-  const [gameUid, setGameUid] = useState('#AN-000000');
-  const [userMobile, setUserMobile] = useState('No Mobile Added'); // 📱 New Mobile State
-  const [redDiamonds, setRedDiamonds] = useState(0);
-  const [whiteDiamonds, setWhiteDiamonds] = useState(0);
-  const [winningCash, setWinningCash] = useState(0);
+  const [userName, setUserName] = useState<string>('New Player');
+  const [gameUid, setGameUid] = useState<string>('#AN-000000');
+  const [userMobile, setUserMobile] = useState<string>('No Mobile Added'); // 📱 New Mobile State
+  const [redDiamonds, setRedDiamonds] = useState<number>(0);
+  const [whiteDiamonds, setWhiteDiamonds] = useState<number>(0);
+  const [winningCash, setWinningCash] = useState<number>(0);
 
-  // Load actual user stats from Supabase / localStorage on mount
-  useEffect(() => {
-    const savedName = localStorage.getItem('arena_user_name');
-    const savedUid = localStorage.getItem('arena_user_uid');
-    const savedMobile = localStorage.getItem('arena_user_mobile');
-    const savedWhite = localStorage.getItem('arena_white_diamonds');
-    const savedRed = localStorage.getItem('arena_red_diamonds');
-    const savedCash = localStorage.getItem('arena_winning_cash');
+  // Withdraw Form States
+  const [esewaId, setEsewaId] = useState<string>('');
+  const [esewaName, setEsewaName] = useState<string>('');
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('100');
 
-    if (savedName) setUserName(savedName);
-    if (savedUid) {
-      setGameUid(savedUid);
-      fetchUserData(savedUid);
-    }
-    if (savedMobile) setUserMobile(savedMobile);
-    if (savedWhite) setWhiteDiamonds(Number(savedWhite));
-    if (savedRed) setRedDiamonds(Number(savedRed));
-    if (savedCash) setWinningCash(Number(savedCash));
-  }, []);
+  // Modal States
+  const [showSettingModal, setShowSettingModal] = useState<boolean>(false);
+  const [settingTab, setSettingTab] = useState<'support' | 'terms' | 'about'>(
+    'support'
+  );
+
+  // History State
+  const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
 
   // Fetch real-time data from Supabase profiles & history
   const fetchUserData = async (uid: string) => {
@@ -63,7 +64,7 @@ export default function WalletPage() {
         .order('created_at', { ascending: false });
 
       if (historyData) {
-        const formattedHistory = historyData.map((item) => ({
+        const formattedHistory: HistoryItem[] = historyData.map((item: any) => ({
           type: 'Withdraw Request',
           details: `NPR ${item.amount} via eSewa (${item.esewa_id})`,
           date: new Date(item.created_at).toLocaleDateString(),
@@ -76,21 +77,25 @@ export default function WalletPage() {
     }
   };
 
-  // Withdraw Form States
-  const [esewaId, setEsewaId] = useState('');
-  const [esewaName, setEsewaName] = useState('');
-  const [withdrawAmount, setWithdrawAmount] = useState('100');
+  // Load actual user stats from Supabase / localStorage on mount
+  useEffect(() => {
+    const savedName = localStorage.getItem('arena_user_name');
+    const savedUid = localStorage.getItem('arena_user_uid');
+    const savedMobile = localStorage.getItem('arena_user_mobile');
+    const savedWhite = localStorage.getItem('arena_white_diamonds');
+    const savedRed = localStorage.getItem('arena_red_diamonds');
+    const savedCash = localStorage.getItem('arena_winning_cash');
 
-  // Modal States
-  const [showSettingModal, setShowSettingModal] = useState(false);
-  const [settingTab, setSettingTab] = useState<'support' | 'terms' | 'about'>(
-    'support'
-  );
-
-  // History State
-  const [historyList, setHistoryList] = useState<
-    Array<{ type: string; details: string; date: string; status: string }>
-  >([]);
+    if (savedName) setUserName(savedName);
+    if (savedUid) {
+      setGameUid(savedUid);
+      fetchUserData(savedUid);
+    }
+    if (savedMobile) setUserMobile(savedMobile);
+    if (savedWhite) setWhiteDiamonds(Number(savedWhite));
+    if (savedRed) setRedDiamonds(Number(savedRed));
+    if (savedCash) setWinningCash(Number(savedCash));
+  }, []);
 
   // 📋 Copy UID Function
   const handleCopyUid = () => {
@@ -117,7 +122,7 @@ export default function WalletPage() {
     localStorage.setItem('arena_user_name', updatedName);
     localStorage.setItem('arena_user_mobile', updatedMobile);
 
-    // Update in Supabase profiles (Note: ensure mobile_number column exists in your profiles table)
+    // Update in Supabase profiles
     await supabase
       .from('profiles')
       .update({
@@ -168,7 +173,7 @@ export default function WalletPage() {
       .eq('user_uid', gameUid);
 
     // 3. Add to local history list
-    setHistoryList((prev) => [
+    setHistoryList((prev: HistoryItem[]) => [
       {
         type: 'Withdraw Request',
         details: `NPR ${withdrawAmount} via eSewa (${esewaId})`,

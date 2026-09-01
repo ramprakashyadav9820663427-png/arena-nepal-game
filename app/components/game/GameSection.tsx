@@ -5,22 +5,22 @@ export default function NeonDodgeGame() {
   const [gameState, setGameState] = useState<'IDLE' | 'PLAYING' | 'GAMEOVER'>(
     'IDLE'
   );
-  const [score, setScore] = useState(0);
-  const [diamonds, setDiamonds] = useState(0);
-  const [layer, setLayer] = useState(1);
-  const [timeLeft, setTimeLeft] = useState(120); // 2 minutes per layer
+  const [score, setScore] = useState<number>(0);
+  const [diamonds, setDiamonds] = useState<number>(0);
+  const [layer, setLayer] = useState<number>(1);
+  const [timeLeft, setTimeLeft] = useState<number>(120); // 2 minutes per layer
 
   // Cooldown timers state (in seconds) - Persistent using localStorage
-  const [doubleCooldown, setDoubleCooldown] = useState(0);
-  const [reviveCooldown, setReviveCooldown] = useState(0);
-  const [isDoubleRewarded, setIsDoubleRewarded] = useState(false);
-  const [hasSyncedWallet, setHasSyncedWallet] = useState(false);
+  const [doubleCooldown, setDoubleCooldown] = useState<number>(0);
+  const [reviveCooldown, setReviveCooldown] = useState<number>(0);
+  const [isDoubleRewarded, setIsDoubleRewarded] = useState<boolean>(false);
+  const [hasSyncedWallet, setHasSyncedWallet] = useState<boolean>(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const requestRef = useRef<number>(0);
 
   // Game entities refs (player size & position)
-  const playerRef = useRef({ x: 150, y: 315, radius: 14 });
+  const playerRef = useRef<{ x: number; y: number; radius: number }>({ x: 150, y: 315, radius: 14 });
   const obstaclesRef = useRef<
     { x: number; y: number; size: number; speed: number }[]
   >([]);
@@ -190,9 +190,9 @@ export default function NeonDodgeGame() {
       secondCounter += deltaTime;
       if (secondCounter >= 1) {
         secondCounter = 0;
-        setTimeLeft((prev) => {
+        setTimeLeft((prev: number) => {
           if (prev <= 1) {
-            setLayer((l) => (l < 7 ? l + 1 : l));
+            setLayer((l: number) => (l < 7 ? l + 1 : l));
             return 120;
           }
           return prev - 1;
@@ -263,7 +263,7 @@ export default function NeonDodgeGame() {
           setGameState('GAMEOVER');
           moveDirectionRef.current = null;
 
-          setHasSyncedWallet((prevSynced) => {
+          setHasSyncedWallet((prevSynced: boolean) => {
             if (!prevSynced && diamonds > 0) {
               addToWallet(diamonds);
             }
@@ -273,7 +273,7 @@ export default function NeonDodgeGame() {
 
         if (obs.y > canvas.height) {
           obstaclesRef.current.splice(index, 1);
-          setScore((s) => s + 10);
+          setScore((s: number) => s + 10);
         }
       });
 
@@ -289,7 +289,7 @@ export default function NeonDodgeGame() {
 
         const dist = Math.hypot(p.x - (dia.x + 10), p.y - (dia.y + 10));
         if (dist < p.radius + 8) {
-          setDiamonds((d) => d + dia.value);
+          setDiamonds((d: number) => d + dia.value);
           collectibleDiamondsRef.current.splice(index, 1);
         }
 
