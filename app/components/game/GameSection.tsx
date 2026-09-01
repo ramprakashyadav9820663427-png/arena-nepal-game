@@ -1,7 +1,20 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 
-export default function NeonDodgeGame() {
+interface UserWallet {
+  cash?: number;
+  winning_cash?: number;
+  white_diamonds?: number;
+  red_diamonds?: number;
+  [key: string]: any;
+}
+
+interface NeonDodgeGameProps {
+  wallet?: UserWallet;
+  setWallet?: React.Dispatch<React.SetStateAction<UserWallet>>;
+}
+
+export default function NeonDodgeGame({ wallet, setWallet }: NeonDodgeGameProps) {
   const [gameState, setGameState] = useState<'IDLE' | 'PLAYING' | 'GAMEOVER'>(
     'IDLE'
   );
