@@ -17,6 +17,33 @@ export default function AdminPage() {
   const [targetUid, setTargetUid] = useState('');
   const [addDiamonds, setAddDiamonds] = useState('100');
 
+  // Web Audio API helper for crisp 'Tak-Tak' sound effect on button press
+  const playClickSound = () => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(300, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.04);
+      
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.04);
+      
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      
+      osc.start();
+      osc.stop(ctx.currentTime + 0.04);
+    } catch (e) {
+      // Ignore audio context errors if browser blocks autoplay
+    }
+  };
+
   useEffect(() => {
     if (isAuthenticated) {
       fetchWithdrawRequests();
@@ -26,6 +53,7 @@ export default function AdminPage() {
   // Handle Login Password Submit
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    playClickSound();
     if (inputPassword === ADMIN_SECRET_PASSWORD) {
       setIsAuthenticated(true);
     } else {
@@ -50,6 +78,7 @@ export default function AdminPage() {
 
   // Approve/Success Withdraw Request
   const handleApproveWithdraw = async (id: number) => {
+    playClickSound();
     const { error } = await supabase
       .from('withdraw_requests')
       .update({ status: 'Success' })
@@ -66,6 +95,7 @@ export default function AdminPage() {
   // Add Red Diamonds to User Profile
   const handleAddDiamondsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    playClickSound();
     if (!targetUid) {
       alert('Please enter a valid User UID');
       return;
@@ -132,7 +162,8 @@ export default function AdminPage() {
             />
             <button
               type="submit"
-              className="py-3 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold rounded-xl text-xs shadow-lg hover:opacity-90 transition-all"
+              onClick={playClickSound}
+              className="py-3 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold rounded-xl text-xs shadow-lg hover:opacity-90 transition-all cursor-pointer"
             >
               Login to Admin Panel
             </button>
@@ -144,7 +175,7 @@ export default function AdminPage() {
 
   // 2. पासवर्ड सही होने के बाद असली एडमिन पैनल खुलेगा
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-white p-4 flex flex-col items-center">
+    <div className="min-h-screen bg-[#0B0F19] text-white p-4 flex flex-col items-center select-none">
       <div className="w-full max-w-2xl bg-gray-900 border border-purple-500/30 p-4 rounded-2xl mb-6 flex justify-between items-center">
         <div>
           <h1 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
@@ -155,8 +186,11 @@ export default function AdminPage() {
           </p>
         </div>
         <button
-          onClick={() => setIsAuthenticated(false)}
-          className="px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 text-xs font-bold rounded-xl hover:bg-red-600 hover:text-white transition-all"
+          onClick={() => {
+            playClickSound();
+            setIsAuthenticated(false);
+          }}
+          className="px-3 py-1.5 bg-red-600/25 border border-red-500/40 text-red-400 text-xs font-bold rounded-xl hover:bg-red-600 hover:text-white transition-all cursor-pointer"
         >
           Logout
         </button>
@@ -165,8 +199,11 @@ export default function AdminPage() {
       {/* Admin Tabs */}
       <div className="w-full max-w-2xl grid grid-cols-2 gap-2 mb-6">
         <button
-          onClick={() => setActiveTab('withdraws')}
-          className={`py-2.5 text-xs font-bold rounded-xl transition-all ${
+          onClick={() => {
+            playClickSound();
+            setActiveTab('withdraws');
+          }}
+          className={`py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
             activeTab === 'withdraws'
               ? 'bg-cyan-500 text-black shadow'
               : 'bg-gray-900 text-gray-400 border border-gray-800'
@@ -175,8 +212,11 @@ export default function AdminPage() {
           Withdraw Requests ({withdrawRequests.length})
         </button>
         <button
-          onClick={() => setActiveTab('diamonds')}
-          className={`py-2.5 text-xs font-bold rounded-xl transition-all ${
+          onClick={() => {
+            playClickSound();
+            setActiveTab('diamonds');
+          }}
+          className={`py-2.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
             activeTab === 'diamonds'
               ? 'bg-cyan-500 text-black shadow'
               : 'bg-gray-900 text-gray-400 border border-gray-800'
@@ -229,7 +269,7 @@ export default function AdminPage() {
                 {req.status === 'Processing' && (
                   <button
                     onClick={() => handleApproveWithdraw(req.id)}
-                    className="mt-2 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg text-xs transition-all shadow"
+                    className="mt-2 py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg text-xs transition-all shadow cursor-pointer"
                   >
                     Mark as Success (Payment Sent)
                   </button>
@@ -277,7 +317,7 @@ export default function AdminPage() {
             </div>
             <button
               type="submit"
-              className="mt-2 py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold rounded-xl text-xs shadow-lg hover:opacity-90 transition-all"
+              className="mt-2 py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-bold rounded-xl text-xs shadow-lg hover:opacity-90 transition-all cursor-pointer"
             >
               Add Red Diamonds to User
             </button>

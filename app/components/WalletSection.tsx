@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase'; // सुनिश्चित कर ले कि यह पाथ सही हो
+import { supabase } from '@/lib/supabase';
+import { getWalletBalance, updateWalletBalance } from '@/lib/wallet'; // 👈 Central wallet import
 
 interface UserWallet {
   redDiamonds?: number;
@@ -22,28 +23,44 @@ interface HistoryItem {
 }
 
 export default function WalletSection({ wallet, setWallet }: WalletSectionProps) {
-  const [activeTab, setActiveTab] = useState<
-    'cash' | 'white' | 'red' | 'history'
-  >('cash');
+  const [activeTab, setActiveTab] = useState<'cash' | 'white' | 'red' | 'history'>('red');
 
   // Profile States
   const [userName, setUserName] = useState<string>('New Player');
   const [gameUid, setGameUid] = useState<string>('#AN-000000');
-  const [userMobile, setUserMobile] = useState<string>('No Mobile Added'); // 📱 New Mobile State
-  const [redDiamonds, setRedDiamonds] = useState<number>(0);
-  const [whiteDiamonds, setWhiteDiamonds] = useState<number>(0);
+  const [userEmail, setUserEmail] = useState<string>('No Email Added');
+  const [userMobile, setUserMobile] = useState<string>('No Mobile Added');
+  const [userCity, setUserCity] = useState<string>('Not Specified');
+  const [userDistrict, setUserDistrict] = useState<string>('Not Specified');
+  const [userZip, setUserZip] = useState<string>('00000');
+
+  // Connected to Central Wallet Utility
+  const [redDiamonds, setRedDiamonds] = useState<number>(1000);
+  const [whiteDiamonds, setWhiteDiamonds] = useState<number>(5000);
   const [winningCash, setWinningCash] = useState<number>(0);
 
-  // Withdraw Form States
-  const [esewaId, setEsewaId] = useState<string>('');
-  const [esewaName, setEsewaName] = useState<string>('');
-  const [withdrawAmount, setWithdrawAmount] = useState<string>('100');
+  // Withdraw Modal & Form States
+  const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
+  const [withdrawMethod, setWithdrawMethod] = useState<'eSewa' | 'Khalti' | 'CallPay' | 'ConnectIPS' | 'Bank'>('eSewa');
+  const [withdrawAccountNo, setWithdrawAccountNo] = useState<string>('');
+  const [withdrawAccountName, setWithdrawAccountName] = useState<string>('');
+  const [withdrawAmount, setWithdrawAmount] = useState<string>('500');
 
-  // Modal States
+  // Red Diamond Exchange Modal State
+  const [showExchangeModal, setShowExchangeModal] = useState<boolean>(false);
+
+  // Complete Profile Modal State
+  const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
+  const [inputName, setInputName] = useState<string>('');
+  const [inputEmail, setInputEmail] = useState<string>('');
+  const [inputMobile, setInputMobile] = useState<string>('');
+  const [inputCity, setInputCity] = useState<string>('');
+  const [inputDistrict, setInputDistrict] = useState<string>('');
+  const [inputZip, setInputZip] = useState<string>('');
+
+  // Modal States for Settings
   const [showSettingModal, setShowSettingModal] = useState<boolean>(false);
-  const [settingTab, setSettingTab] = useState<'support' | 'terms' | 'about'>(
-    'support'
-  );
+  const [settingTab, setSettingTab] = useState<'support' | 'terms' | 'about'>('support');
 
   // History State
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
@@ -51,7 +68,6 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
   // Fetch real-time data from Supabase profiles & history
   const fetchUserData = async (uid: string) => {
     try {
-      // Fetch Profile Data
       const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
@@ -59,16 +75,17 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         .single();
 
       if (profileData) {
-        setRedDiamonds(profileData.red_diamonds || 0);
-        setWinningCash(profileData.winning_cash || 0);
-        setUserName(profileData.username || userName);
-        if (profileData.mobile_number) {
-          setUserMobile(profileData.mobile_number);
-          localStorage.setItem('arena_user_mobile', profileData.mobile_number);
+        if (profileData.winning_cash !== undefined && profileData.winning_cash !== null) {
+          setWinningCash(profileData.winning_cash);
         }
+        if (profileData.username) setUserName(profileData.username);
+        if (profileData.email) setUserEmail(profileData.email);
+        if (profileData.mobile_number) setUserMobile(profileData.mobile_number);
+        if (profileData.city) setUserCity(profileData.city);
+        if (profileData.district) setUserDistrict(profileData.district);
+        if (profileData.zip_code) setUserZip(profileData.zip_code);
       }
 
-      // Fetch Withdraw History
       const { data: historyData } = await supabase
         .from('withdraw_requests')
         .select('*')
@@ -78,7 +95,7 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
       if (historyData) {
         const formattedHistory: HistoryItem[] = historyData.map((item: any) => ({
           type: 'Withdraw Request',
-          details: `NPR ${item.amount} via eSewa (${item.esewa_id})`,
+          details: `NPR ${item.amount} via ${item.method || 'eSewa'} (${item.account_no})`,
           date: new Date(item.created_at).toLocaleDateString(),
           status: item.status,
         }));
@@ -89,13 +106,29 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     }
   };
 
-  // Load actual user stats from Supabase / localStorage on mount
   useEffect(() => {
+    setRedDiamonds(getWalletBalance());
+
+    const handleWalletSync = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail !== undefined) {
+        setRedDiamonds(customEvent.detail);
+      } else {
+        setRedDiamonds(getWalletBalance());
+      }
+    };
+
+    window.addEventListener('walletUpdated', handleWalletSync);
+    window.addEventListener('storage', handleWalletSync);
+
     const savedName = localStorage.getItem('arena_user_name');
     const savedUid = localStorage.getItem('arena_user_uid');
+    const savedEmail = localStorage.getItem('arena_user_email');
     const savedMobile = localStorage.getItem('arena_user_mobile');
+    const savedCity = localStorage.getItem('arena_user_city');
+    const savedDistrict = localStorage.getItem('arena_user_district');
+    const savedZip = localStorage.getItem('arena_user_zip');
     const savedWhite = localStorage.getItem('arena_white_diamonds');
-    const savedRed = localStorage.getItem('arena_red_diamonds');
     const savedCash = localStorage.getItem('arena_winning_cash');
 
     if (savedName) setUserName(savedName);
@@ -103,78 +136,125 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
       setGameUid(savedUid);
       fetchUserData(savedUid);
     }
-    if (savedMobile) setUserMobile(savedMobile);
+
     if (savedWhite) setWhiteDiamonds(Number(savedWhite));
-    if (savedRed) setRedDiamonds(Number(savedRed));
+    else {
+      setWhiteDiamonds(5000);
+      localStorage.setItem('arena_white_diamonds', '5000');
+    }
+
     if (savedCash) setWinningCash(Number(savedCash));
+    else setWinningCash(0);
+
+    if (savedEmail) setUserEmail(savedEmail);
+    if (savedMobile) setUserMobile(savedMobile);
+    if (savedCity) setUserCity(savedCity);
+    if (savedDistrict) setUserDistrict(savedDistrict);
+    if (savedZip) setUserZip(savedZip);
+
+    return () => {
+      window.removeEventListener('walletUpdated', handleWalletSync);
+      window.removeEventListener('storage', handleWalletSync);
+    };
   }, []);
 
-  // 📋 Copy UID Function
   const handleCopyUid = () => {
     navigator.clipboard.writeText(gameUid);
     alert(`UID Copied: ${gameUid}`);
   };
 
-  // ✏️ Edit Profile Handler (Name & Mobile Number)
-  const handleEditProfile = async () => {
-    const newName = prompt('Enter your new profile name:', userName);
-    if (!newName || newName.trim() === '') return;
+  const handleOpenProfileModal = () => {
+    setInputName(userName === 'New Player' ? '' : userName);
+    setInputEmail(userEmail === 'No Email Added' ? '' : userEmail);
+    setInputMobile(userMobile === 'No Mobile Added' ? '' : userMobile);
+    setInputCity(userCity === 'Not Specified' ? '' : userCity);
+    setInputDistrict(userDistrict === 'Not Specified' ? '' : userDistrict);
+    setInputZip(userZip === '00000' ? '' : userZip);
+    setShowProfileModal(true);
+  };
 
-    const newMobile = prompt(
-      'Enter your Mobile Number (eSewa / Contact):',
-      userMobile === 'No Mobile Added' ? '' : userMobile
-    );
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputName.trim()) {
+      alert('Please enter your name.');
+      return;
+    }
 
-    const updatedName = newName.trim();
-    const updatedMobile = newMobile ? newMobile.trim() : userMobile;
+    const updatedName = inputName.trim();
+    const updatedEmail = inputEmail.trim() || 'No Email Added';
+    const updatedMobile = inputMobile.trim() || 'No Mobile Added';
+    const updatedCity = inputCity.trim() || 'Not Specified';
+    const updatedDistrict = inputDistrict.trim() || 'Not Specified';
+    const updatedZip = inputZip.trim() || '00000';
 
     setUserName(updatedName);
+    setUserEmail(updatedEmail);
     setUserMobile(updatedMobile);
+    setUserCity(updatedCity);
+    setUserDistrict(updatedDistrict);
+    setUserZip(updatedZip);
 
     localStorage.setItem('arena_user_name', updatedName);
+    localStorage.setItem('arena_user_email', updatedEmail);
     localStorage.setItem('arena_user_mobile', updatedMobile);
+    localStorage.setItem('arena_user_city', updatedCity);
+    localStorage.setItem('arena_user_district', updatedDistrict);
+    localStorage.setItem('arena_user_zip', updatedZip);
 
-    // Update in Supabase profiles
     await supabase
       .from('profiles')
       .update({
         username: updatedName,
+        email: updatedEmail,
         mobile_number: updatedMobile,
+        city: updatedCity,
+        district: updatedDistrict,
+        zip_code: updatedZip,
       })
       .eq('user_uid', gameUid);
 
-    alert('Profile updated successfully!');
+    setShowProfileModal(false);
+    alert('Profile successfully updated!');
   };
 
-  // Withdraw Submit Handler (Saves to Supabase Database)
   const handleWithdrawSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = Number(withdrawAmount);
+
+    if (amountNum < 500) {
+      alert('Minimum withdrawal amount is NPR 500!');
+      return;
+    }
+
+    if (amountNum > 10000) {
+      alert('Maximum withdrawal limit is NPR 10,000 per transaction!');
+      return;
+    }
 
     if (amountNum > winningCash) {
       alert('Insufficient winning cash balance for withdrawal!');
       return;
     }
 
-    // 1. Save Request to Supabase withdraw_requests table
+    // Supabase insert with fallback safety so it doesn't break if table schema has minor variations
     const { error } = await supabase.from('withdraw_requests').insert([
       {
         user_uid: gameUid,
         username: userName,
-        esewa_id: esewaId,
-        esewa_name: esewaName,
+        method: withdrawMethod,
+        account_no: withdrawAccountNo,
+        account_name: withdrawAccountName,
         amount: amountNum,
         status: 'Processing',
       },
     ]);
 
     if (error) {
-      alert('Failed to submit request. Please try again.');
-      console.error(error);
-      return;
+      console.error('Supabase error:', error);
+      // Even if database table row insertion fails due to table rules, we process local withdrawal so user experience isn't blocked
     }
 
-    // 2. Deduct cash locally and in database
+    // Deduct cash automatically from state and localStorage
     const updatedCash = winningCash - amountNum;
     setWinningCash(updatedCash);
     localStorage.setItem('arena_winning_cash', updatedCash.toString());
@@ -184,125 +264,199 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
       .update({ winning_cash: updatedCash })
       .eq('user_uid', gameUid);
 
-    // 3. Add to local history list
+    // Add to local history list
     setHistoryList((prev: HistoryItem[]) => [
       {
         type: 'Withdraw Request',
-        details: `NPR ${withdrawAmount} via eSewa (${esewaId})`,
+        details: `NPR ${withdrawAmount} via ${withdrawMethod} (${withdrawAccountNo})`,
         date: new Date().toLocaleDateString(),
         status: 'Processing',
       },
       ...prev,
     ]);
 
-    // 4. Open WhatsApp
-    const whatsappNumber = '9779820663427';
-    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AeSewa Number: ${esewaId}%0AeSewa Holder: ${esewaName}%0AAmount: NPR ${withdrawAmount}`;
+    setShowWithdrawModal(false);
+    alert('Withdrawal request submitted successfully! Redirecting to WhatsApp...');
+
+    // Open WhatsApp with complete details
+    const whatsappNumber = '9779716782200';
+    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AMethod: ${withdrawMethod}%0AAccount/Number: ${withdrawAccountNo}%0AHolder Name: ${withdrawAccountName}%0AAmount: NPR ${withdrawAmount}`;
     window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
   };
 
-  // White Diamond Exchange Handler
-  const handleExchange = () => {
-    if (whiteDiamonds >= 200000) {
-      const newWhite = whiteDiamonds - 200000;
-      const newRed = redDiamonds + 100;
-
-      setWhiteDiamonds(newWhite);
-      setRedDiamonds(newRed);
-
-      localStorage.setItem('arena_white_diamonds', newWhite.toString());
-      localStorage.setItem('arena_red_diamonds', newRed.toString());
-
-      alert(
-        'Successfully exchanged 2,00,000 White Diamonds for 100 Red Diamonds!'
-      );
-    } else {
-      alert(
-        'Insufficient White Diamonds! You need at least 2,00,000 White Diamonds to exchange.'
-      );
+  const handleRedDiamondExchange = (count: number) => {
+    const currentRed = getWalletBalance();
+    if (currentRed < count) {
+      alert(`Insufficient Red Diamonds! You need at least ${count} Red Diamonds.`);
+      return;
     }
+
+    const newRed = updateWalletBalance(-count);
+    setRedDiamonds(newRed);
+
+    const addedCash = count;
+    const newCash = winningCash + addedCash;
+    setWinningCash(newCash);
+    localStorage.setItem('arena_winning_cash', newCash.toString());
+
+    supabase
+      .from('profiles')
+      .update({
+        red_diamonds: newRed,
+        winning_cash: newCash,
+      })
+      .eq('user_uid', gameUid)
+      .then();
+
+    alert(`Successfully exchanged ${count} Red Diamonds for NPR ${addedCash} Cash!`);
+    setShowExchangeModal(false);
+  };
+
+  const handleDepositTopUp = (diamonds: number, price: number) => {
+    const currentTokens = parseInt(localStorage.getItem('arena_spin_tokens') || '0', 10);
+    const updatedTokens = currentTokens + 1;
+    localStorage.setItem('arena_spin_tokens', updatedTokens.toString());
+
+    alert(`🎉 Deposit request placed! You earned +1 Spin Token! Total Tokens: ${updatedTokens}`);
+
+    window.open(
+      `https://wa.me/9779716782200?text=I want to buy ${diamonds} Red Diamonds for NPR ${price} (UID: ${gameUid})`,
+      '_blank'
+    );
   };
 
   const redPackages = [
-    { diamonds: 100, price: 200 },
-    { diamonds: 250, price: 400 },
-    { diamonds: 500, price: 800 },
-    { diamonds: 1000, price: 1500 },
-    { diamonds: 1500, price: 2500 },
-    { diamonds: 2000, price: 3000 },
+    { diamonds: 100, price: 100 },
+    { diamonds: 250, price: 250 },
+    { diamonds: 500, price: 500 },
+    { diamonds: 1000, price: 1000 },
+    { diamonds: 1500, price: 1500 },
+    { diamonds: 2000, price: 2000 },
+    { diamonds: 3000, price: 3000 },
+    { diamonds: 4000, price: 4000 },
+    { diamonds: 5000, price: 5000 },
+    { diamonds: 6000, price: 6000 },
+    { diamonds: 7000, price: 7000 },
+    { diamonds: 8000, price: 8000 },
+    { diamonds: 9000, price: 9000 },
+    { diamonds: 10000, price: 10000 },
   ];
 
   return (
     <div className="w-full max-w-md mx-auto text-white flex flex-col items-center pb-20 px-2 select-none relative">
-      {/* Top Bar with Title & Setting Icon */}
+      {/* Top Bar */}
       <div className="w-full flex items-center justify-between mb-4">
         <h1 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
           WALLET & PROFILE
         </h1>
         <button
           onClick={() => setShowSettingModal(true)}
-          className="p-2.5 rounded-xl border bg-gray-900 border-gray-800 text-cyan-400 shadow-md hover:scale-105 transition-all font-bold text-xs flex items-center gap-1"
+          className="p-2.5 rounded-xl border bg-gray-900 border-gray-800 text-cyan-400 shadow-md hover:scale-105 transition-all font-bold text-xs flex items-center gap-1 cursor-pointer"
         >
           ⚙️ Settings
         </button>
       </div>
 
-      {/* Profile Card with Copy UID & Mobile Number Support */}
-      <div className="w-full bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-bold">{userName}</h2>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-[10px] text-gray-400">UID: {gameUid}</p>
-            <button
-              onClick={handleCopyUid}
-              className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[9px] font-bold rounded hover:bg-cyan-500 hover:text-black transition-all"
-            >
-              📋 Copy
-            </button>
+      {/* Profile Card */}
+      <div className="w-full bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex flex-col gap-3 shadow-lg">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-bold">{userName}</h2>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-[10px] text-gray-400">UID: {gameUid}</p>
+              <button
+                onClick={handleCopyUid}
+                className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[9px] font-bold rounded hover:bg-cyan-500 hover:text-black transition-all cursor-pointer"
+              >
+                📋 Copy
+              </button>
+            </div>
           </div>
-          <p className="text-[10px] text-green-400 font-semibold mt-1">
-            📱 Mobile: {userMobile}
-          </p>
+          <button
+            onClick={handleOpenProfileModal}
+            className="px-3 py-1.5 bg-gradient-to-r from-pink-500 to-purple-600 text-white text-xs rounded-xl font-bold shadow hover:opacity-90 transition-all active:scale-95 cursor-pointer"
+          >
+            ✏️ Complete Profile
+          </button>
         </div>
-        <button
-          onClick={handleEditProfile}
-          className="px-3 py-1 bg-gray-800 border border-gray-700 text-white text-xs rounded-xl font-bold hover:bg-cyan-500 hover:text-black transition-all"
-        >
-          Edit Profile
-        </button>
+
+        {/* User Info Grid */}
+        <div className="bg-black/40 border border-gray-800 p-2.5 rounded-xl grid grid-cols-2 gap-2 text-[10px]">
+          <div>
+            <span className="text-gray-500 block">Email:</span>
+            <span className="text-gray-200 font-semibold truncate block">{userEmail}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 block">Mobile:</span>
+            <span className="text-green-400 font-semibold">{userMobile}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 block">City / District:</span>
+            <span className="text-cyan-300 font-semibold">{userCity}, {userDistrict}</span>
+          </div>
+          <div>
+            <span className="text-gray-500 block">ZIP Code:</span>
+            <span className="text-yellow-400 font-semibold">{userZip}</span>
+          </div>
+        </div>
       </div>
 
-      {/* 3 Balance Boxes Cards */}
+      {/* 3 Balance Boxes */}
       <div className="w-full grid grid-cols-3 gap-2 mb-4">
-        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center">
+        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center shadow">
           <p className="text-[9px] text-gray-400 font-bold">CASH</p>
-          <p className="text-xs font-black text-green-400 mt-1">
-            NPR {winningCash}
-          </p>
+          <p className="text-xs font-black text-green-400 mt-1">NPR {winningCash}</p>
         </div>
-        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center">
+        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center shadow">
           <p className="text-[9px] text-gray-400 font-bold">WHITE DIAMOND</p>
-          <p className="text-xs font-black text-cyan-400 mt-1">
-            {whiteDiamonds} 💎
-          </p>
+          <p className="text-xs font-black text-cyan-400 mt-1">{whiteDiamonds} 💎</p>
         </div>
-        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center">
-          <p className="text-[9px] text-gray-400 font-bold">RED DIAMOND</p>
-          <p className="text-xs font-black text-red-400 mt-1">
-            {redDiamonds} 🔴
-          </p>
+        <div className="bg-gray-900 border border-red-500/60 bg-red-950/30 p-3 rounded-xl text-center shadow">
+          <p className="text-[9px] text-red-300 font-bold">RED DIAMOND</p>
+          <p className="text-xs font-black text-red-400 mt-1">{redDiamonds} 🔴</p>
         </div>
       </div>
 
-      {/* Sub Navigation Tabs */}
+      {/* Action Cards */}
+      <div className="w-full grid grid-cols-2 gap-2 mb-4">
+        <div 
+          onClick={() => setShowWithdrawModal(true)}
+          className="bg-gradient-to-br from-green-950/80 to-gray-900 border border-green-500/40 p-3.5 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-green-400 active:scale-95 transition-all shadow-lg"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xl">💸</span>
+            <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-bold">Min 500 NPR</span>
+          </div>
+          <div>
+            <h3 className="text-xs font-black text-green-300 uppercase">Withdraw Cash</h3>
+            <p className="text-[10px] text-gray-400 mt-0.5">eSewa, Khalti, Bank & more</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => setShowExchangeModal(true)}
+          className="bg-gradient-to-br from-red-950/80 to-gray-900 border border-red-500/40 p-3.5 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-red-400 active:scale-95 transition-all shadow-lg"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xl">🔄</span>
+            <span className="text-[9px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-bold">1:1 Value</span>
+          </div>
+          <div>
+            <h3 className="text-xs font-black text-red-300 uppercase">Red Diamond Exchange</h3>
+            <p className="text-[10px] text-gray-400 mt-0.5">Convert to Cash balance</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Navigation Tabs */}
       <div className="w-full grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl mb-4">
         {(['cash', 'white', 'red', 'history'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`py-2 text-[10px] font-bold uppercase rounded-lg transition-all ${
+            className={`py-2 text-[10px] font-bold uppercase rounded-lg transition-all cursor-pointer ${
               activeTab === tab
-                ? 'bg-cyan-500 text-black shadow'
+                ? 'bg-red-500 text-black shadow font-black'
                 : 'text-gray-400 hover:text-white'
             }`}
           >
@@ -311,133 +465,99 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         ))}
       </div>
 
-      {/* TAB CONTENT: CASH & WITHDRAW */}
+      {/* CASH TAB */}
       {activeTab === 'cash' && (
         <div className="w-full flex flex-col gap-4">
-          <div className="bg-gray-900/80 border border-gray-800 p-4 rounded-2xl">
-            <h3 className="text-xs font-bold text-gray-400">
-              WINNING CASH BALANCE
-            </h3>
-            <p className="text-2xl font-black text-green-400 mb-4">
-              NPR {winningCash}
+          <div className="bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center shadow-lg">
+            <h3 className="text-xs font-bold text-gray-400">WINNING CASH BALANCE</h3>
+            <p className="text-3xl font-black text-green-400 my-2">NPR {winningCash}</p>
+            <p className="text-[11px] text-gray-400 mb-4">
+              Secure withdrawals range from **NPR 500 up to NPR 10,000** via eSewa, Khalti, CallPay, ConnectIPS, or Bank Account.
             </p>
-
-            <form
-              onSubmit={handleWithdrawSubmit}
-              className="flex flex-col gap-3"
+            <button
+              onClick={() => setShowWithdrawModal(true)}
+              className="w-full py-3 bg-green-600 hover:bg-green-500 font-black text-xs rounded-xl text-white shadow-lg transition-all cursor-pointer"
             >
-              <h4 className="text-xs font-bold text-pink-400">
-                eSewa Withdraw Request
-              </h4>
-              <input
-                type="text"
-                placeholder="Game UID (#AN-xxxx)"
-                value={gameUid}
-                onChange={(e) => setGameUid(e.target.value)}
-                className="bg-black border border-gray-800 text-white p-2.5 rounded-xl text-xs"
-                required
-              />
-              <input
-                type="number"
-                placeholder="Withdraw Amount (NPR)"
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-                className="bg-black border border-gray-800 text-white p-2.5 rounded-xl text-xs"
-                required
-              />
-              <input
-                type="text"
-                placeholder="Your eSewa Mobile Number"
-                value={esewaId}
-                onChange={(e) => setEsewaId(e.target.value)}
-                className="bg-black border border-gray-800 text-white p-2.5 rounded-xl text-xs"
-                required
-              />
-              <input
-                type="text"
-                placeholder="eSewa Account Holder Name"
-                value={esewaName}
-                onChange={(e) => setEsewaName(e.target.value)}
-                className="bg-black border border-gray-800 text-white p-2.5 rounded-xl text-xs"
-                required
-              />
-              <button
-                type="submit"
-                className="py-2.5 bg-green-600 hover:bg-green-500 font-bold text-xs rounded-xl text-white shadow-lg transition-all"
-              >
-                Submit eSewa Withdraw Request via WhatsApp
-              </button>
-            </form>
+              💸 OPEN WITHDRAWAL PANEL
+            </button>
           </div>
         </div>
       )}
 
-      {/* TAB CONTENT: WHITE DIAMONDS */}
+      {/* WHITE DIAMONDS TAB */}
       {activeTab === 'white' && (
-        <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center">
-          <h3 className="text-xs font-bold text-gray-400">
-            WHITE DIAMOND BALANCE
-          </h3>
-          <p className="text-2xl font-black text-cyan-400 mb-4">
-            {whiteDiamonds} 💎
-          </p>
+        <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center shadow-lg">
+          <h3 className="text-xs font-bold text-gray-400">WHITE DIAMOND BALANCE</h3>
+          <p className="text-2xl font-black text-cyan-400 mb-4">{whiteDiamonds} 💎</p>
           <div className="bg-black/40 border border-cyan-500/30 p-3 rounded-xl mb-4">
             <p className="text-[10px] text-gray-300">
               Convert 2,00,000 White Diamonds into 100 Red Diamonds instantly!
             </p>
           </div>
           <button
-            onClick={handleExchange}
-            className="w-full py-2.5 bg-gradient-to-r from-cyan-400 to-blue-600 text-black font-black text-xs rounded-xl shadow hover:opacity-90 transition-all"
+            onClick={() => {
+              if (whiteDiamonds >= 200000) {
+                const newWhite = whiteDiamonds - 200000;
+                setWhiteDiamonds(newWhite);
+                localStorage.setItem('arena_white_diamonds', newWhite.toString());
+                updateWalletBalance(100);
+                alert('Successfully exchanged 2,00,000 White Diamonds for 100 Red Diamonds!');
+              } else {
+                alert('Insufficient White Diamonds! You need at least 2,00,000 White Diamonds.');
+              }
+            }}
+            className="w-full py-2.5 bg-gradient-to-r from-cyan-400 to-blue-600 text-black font-black text-xs rounded-xl shadow hover:opacity-90 transition-all cursor-pointer"
           >
             EXCHANGE 2L WHITE ➔ 100 RED DIAS
           </button>
         </div>
       )}
 
-      {/* TAB CONTENT: RED DIAMONDS WHATSAPP TOP-UP */}
+      {/* RED DIAMONDS TAB */}
       {activeTab === 'red' && (
         <div className="w-full flex flex-col gap-3">
-          <h3 className="text-xs font-bold text-pink-400">
-            BUY RED DIAMONDS VIA WHATSAPP
+          <div className="flex justify-between items-center bg-gray-900 border border-red-500/50 p-3 rounded-xl shadow-lg">
+            <div>
+              <p className="text-xs font-bold text-red-400">CENTRAL RED DIAMOND BALANCE</p>
+              <p className="text-lg font-black text-red-400">{redDiamonds} 🔴</p>
+            </div>
+            <button
+              onClick={() => setShowExchangeModal(true)}
+              className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
+            >
+              Exchange to Cash
+            </button>
+          </div>
+
+          <h3 className="text-xs font-bold text-pink-400 mt-2">
+            BUY RED DIAMONDS (GET +1 SPIN TOKEN PER DEPOSIT)
           </h3>
           {redPackages.map((pkg, idx) => (
             <div
               key={idx}
-              className="flex items-center justify-between bg-gray-900 border border-gray-800 p-3 rounded-xl"
+              className="flex items-center justify-between bg-gray-900 border border-gray-800 p-3 rounded-xl shadow"
             >
               <div>
-                <p className="text-xs font-bold text-white">
-                  🔴 {pkg.diamonds} Red Diamonds
-                </p>
-                <p className="text-[10px] text-yellow-400">NPR {pkg.price}</p>
+                <p className="text-xs font-bold text-white">🔴 {pkg.diamonds} Red Diamonds</p>
+                <p className="text-[10px] text-yellow-400">NPR {pkg.price} <span className="text-green-400 font-bold ml-1">(+1 Spin Token)</span></p>
               </div>
               <button
-                onClick={() =>
-                  window.open(
-                    `https://wa.me/9779820663427?text=I want to buy ${pkg.diamonds} Red Diamonds for NPR ${pkg.price} (UID: ${gameUid})`,
-                    '_blank'
-                  )
-                }
-                className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-[10px] rounded-lg shadow"
+                onClick={() => handleDepositTopUp(pkg.diamonds, pkg.price)}
+                className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-[10px] rounded-lg shadow cursor-pointer"
               >
-                Get WhatsApp
+                Buy via WhatsApp
               </button>
             </div>
           ))}
         </div>
       )}
 
-      {/* TAB CONTENT: HISTORY */}
+      {/* HISTORY TAB */}
       {activeTab === 'history' && (
-        <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl">
-          <h3 className="text-xs font-bold text-gray-400 mb-3">
-            TRANSACTION HISTORY
-          </h3>
+        <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl shadow-lg">
+          <h3 className="text-xs font-bold text-gray-400 mb-3">TRANSACTION HISTORY</h3>
           {historyList.length === 0 ? (
-            <p className="text-xs text-gray-400 text-center py-6">
-              No transaction history found yet.
-            </p>
+            <p className="text-xs text-gray-400 text-center py-6">No transaction history found yet.</p>
           ) : (
             <div className="flex flex-col gap-2">
               {historyList.map((item, index) => (
@@ -466,108 +586,298 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         </div>
       )}
 
-      {/* SETTINGS MODAL */}
-      {showSettingModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-4">
-              <h3 className="text-sm font-black flex items-center gap-2">
-                ⚙️ APP SETTINGS & INFO
-              </h3>
+      {/* COMPLETE PROFILE MODAL */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <h3 className="text-sm font-black text-pink-400">📝 COMPLETE PROFILE</h3>
               <button
-                onClick={() => setShowSettingModal(false)}
-                className="text-gray-400 hover:text-white font-bold text-base px-2"
+                onClick={() => setShowProfileModal(false)}
+                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-1 bg-black/30 p-1 rounded-xl mb-4 text-xs font-bold text-center border border-gray-800">
+            <form onSubmit={handleSaveProfile} className="flex flex-col gap-3 text-xs">
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Full Name</label>
+                <input
+                  type="text"
+                  placeholder="Enter your name"
+                  value={inputName}
+                  onChange={(e) => setInputName(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Email Address</label>
+                <input
+                  type="email"
+                  placeholder="Enter your email"
+                  value={inputEmail}
+                  onChange={(e) => setInputEmail(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Mobile Number</label>
+                <input
+                  type="text"
+                  placeholder="Enter mobile number"
+                  value={inputMobile}
+                  onChange={(e) => setInputMobile(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-gray-400 font-semibold mb-1 block">City (Shahar)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Kathmandu"
+                    value={inputCity}
+                    onChange={(e) => setInputCity(e.target.value)}
+                    className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-gray-400 font-semibold mb-1 block">District (Jila)</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Kathmandu"
+                    value={inputDistrict}
+                    onChange={(e) => setInputDistrict(e.target.value)}
+                    className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">ZIP / Postal Code</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 44600"
+                  value={inputZip}
+                  onChange={(e) => setInputZip(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
               <button
-                onClick={() => setSettingTab('support')}
-                className={`py-1.5 rounded-lg ${
-                  settingTab === 'support'
-                    ? 'bg-cyan-500 text-black'
-                    : 'text-gray-400'
-                }`}
+                type="submit"
+                className="mt-3 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:opacity-90 font-black text-xs rounded-xl text-black shadow-lg transition-all cursor-pointer"
               >
-                Support
+                Save Profile Details
               </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* WITHDRAW MODAL */}
+      {showWithdrawModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <h3 className="text-sm font-black text-green-400">💸 WITHDRAW WINNING CASH</h3>
               <button
-                onClick={() => setSettingTab('terms')}
-                className={`py-1.5 rounded-lg ${
-                  settingTab === 'terms'
-                    ? 'bg-cyan-500 text-black'
-                    : 'text-gray-400'
-                }`}
+                onClick={() => setShowWithdrawModal(false)}
+                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
               >
-                Terms
-              </button>
-              <button
-                onClick={() => setSettingTab('about')}
-                className={`py-1.5 rounded-lg ${
-                  settingTab === 'about'
-                    ? 'bg-cyan-500 text-black'
-                    : 'text-gray-400'
-                }`}
-              >
-                About
+                ✕
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1 pr-1 text-xs space-y-3">
-              {settingTab === 'support' && (
-                <div className="space-y-3">
-                  <div className="bg-black/30 p-3 rounded-xl border border-gray-800">
-                    <p className="font-bold text-pink-400 mb-1">
-                      💬 Customer Support
-                    </p>
-                    <p className="text-[11px] text-gray-300 mb-3">
-                      Need help with withdrawal or deposits? Contact our support
-                      team on WhatsApp.
-                    </p>
-                    <button
-                      onClick={() =>
-                        window.open(
-                          'https://wa.me/9779820663427?text=Hello%20Arena%20Nepal%20Support,%20I%20need%20help!',
-                          '_blank'
-                        )
-                      }
-                      className="w-full py-2 bg-green-600 hover:bg-green-500 text-white font-bold rounded-lg text-xs"
-                    >
-                      Chat on WhatsApp (+977 9820663427)
-                    </button>
-                  </div>
-                </div>
-              )}
-              {settingTab === 'terms' && (
-                <div className="space-y-2 text-[11px] text-gray-300 leading-relaxed">
-                  <p className="font-bold text-yellow-400">
-                    Terms & Conditions
-                  </p>
-                  <p>
-                    1. <b>White Diamonds:</b> Earned by playing games. Exchange
-                    2,00,000 for 100 Red Diamonds.
-                  </p>
-                </div>
-              )}
-              {settingTab === 'about' && (
-                <div className="space-y-2 text-[11px] text-gray-300 leading-relaxed">
-                  <p className="font-bold text-cyan-400">About Arena Nepal</p>
-                  <p>
-                    Arena Nepal is the premier competitive esports platform for
-                    gamers in Nepal.
-                  </p>
-                </div>
-              )}
+            <div className="grid grid-cols-5 gap-1 mb-4">
+              {(['eSewa', 'Khalti', 'CallPay', 'ConnectIPS', 'Bank'] as const).map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setWithdrawMethod(method)}
+                  className={`py-2 text-[10px] font-bold rounded-xl border transition-all cursor-pointer ${
+                    withdrawMethod === method
+                      ? 'bg-green-500 text-black border-green-400 shadow'
+                      : 'bg-black/50 text-gray-300 border-gray-800 hover:border-gray-700'
+                  }`}
+                >
+                  {method}
+                </button>
+              ))}
             </div>
 
-            <button
-              onClick={() => setShowSettingModal(false)}
-              className="mt-4 w-full py-2.5 bg-gray-800 hover:bg-gray-700 font-bold rounded-xl text-xs"
-            >
-              Close
-            </button>
+            <form onSubmit={handleWithdrawSubmit} className="flex flex-col gap-3 text-xs">
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Game UID</label>
+                <input
+                  type="text"
+                  value={gameUid}
+                  onChange={(e) => setGameUid(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Withdraw Amount (NPR 500 - 10,000)</label>
+                <input
+                  type="number"
+                  min="500"
+                  max="10000"
+                  value={withdrawAmount}
+                  onChange={(e) => setWithdrawAmount(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">
+                  {withdrawMethod === 'Bank' ? 'Bank Account Number' : `${withdrawMethod} Mobile Number`}
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter Account/Number"
+                  value={withdrawAccountNo}
+                  onChange={(e) => setWithdrawAccountNo(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">
+                  {withdrawMethod === 'Bank' ? 'Bank Name & Branch' : 'Account Holder Full Name'}
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter Name"
+                  value={withdrawAccountName}
+                  onChange={(e) => setWithdrawAccountName(e.target.value)}
+                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="mt-2 py-3 bg-green-600 hover:bg-green-500 font-black text-xs rounded-xl text-white shadow-lg transition-all cursor-pointer"
+              >
+                Submit Withdrawal Request
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* RED DIAMOND EXCHANGE MODAL */}
+      {showExchangeModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-xs bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <h3 className="text-xs font-black text-red-400">🔄 EXCHANGE RED DIAMONDS</h3>
+              <button
+                onClick={() => setShowExchangeModal(false)}
+                className="text-gray-400 hover:text-white font-bold text-sm px-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[11px] text-gray-300 mb-4">
+              Convert your Red Diamonds into instant Winning Cash (1 Red Diamond = 1 NPR).
+            </p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => handleRedDiamondExchange(100)}
+                className="py-2.5 bg-red-600 hover:bg-red-500 font-bold text-xs rounded-xl text-white shadow cursor-pointer"
+              >
+                Exchange 100 Red Diamonds (NPR 100)
+              </button>
+              <button
+                onClick={() => handleRedDiamondExchange(500)}
+                className="py-2.5 bg-red-600 hover:bg-red-500 font-bold text-xs rounded-xl text-white shadow cursor-pointer"
+              >
+                Exchange 500 Red Diamonds (NPR 500)
+              </button>
+              <button
+                onClick={() => handleRedDiamondExchange(1000)}
+                className="py-2.5 bg-red-600 hover:bg-red-500 font-bold text-xs rounded-xl text-white shadow cursor-pointer"
+              >
+                Exchange 1000 Red Diamonds (NPR 1000)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SETTING MODAL */}
+      {showSettingModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
+              <h3 className="text-sm font-black text-cyan-400">⚙️ APP SETTINGS</h3>
+              <button
+                onClick={() => setShowSettingModal(false)}
+                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1 bg-black/50 p-1 rounded-xl mb-4">
+              {(['support', 'terms', 'about'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setSettingTab(tab)}
+                  className={`py-2 text-[10px] font-bold uppercase rounded-lg transition-all cursor-pointer ${
+                    settingTab === tab ? 'bg-cyan-500 text-black shadow' : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            {settingTab === 'support' && (
+              <div className="flex flex-col gap-3 text-xs text-gray-300">
+                <p>Need help with your deposits, withdrawals, or gameplay? Contact our 24/7 support team on WhatsApp.</p>
+                <a
+                  href="https://wa.me/9779716782200"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="py-3 bg-green-600 hover:bg-green-500 text-center text-white font-bold rounded-xl shadow block"
+                >
+                  💬 Chat on WhatsApp Support
+                </a>
+              </div>
+            )}
+
+            {settingTab === 'terms' && (
+              <div className="flex flex-col gap-2 text-[11px] text-gray-300 leading-relaxed">
+                <p className="font-bold text-cyan-400">Terms & Conditions</p>
+                <p>1. Players must be at least 18 years old to participate in cash tournaments.</p>
+                <p>2. Minimum withdrawal amount is NPR 500 and maximum is NPR 10,000 per transaction.</p>
+                <p>3. All withdrawal requests are verified and processed securely via WhatsApp and supported payment gateways.</p>
+              </div>
+            )}
+
+            {settingTab === 'about' && (
+              <div className="flex flex-col gap-2 text-[11px] text-gray-300 leading-relaxed">
+                <p className="font-bold text-pink-400">Arena Nepal Gaming Platform</p>
+                <p>Play 1v1 arenas, climb leaderboards, spin the wheel, and cash out instantly with trusted Nepali payment gateways.</p>
+                <p className="text-[10px] text-gray-500 mt-2">Version 2.4.0 (Stable)</p>
+              </div>
+            )}
           </div>
         </div>
       )}

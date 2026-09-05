@@ -20,10 +20,15 @@ export default function Navbar({
   return (
     <>
       <header className="w-full bg-gray-900 border-b border-gray-800 text-white p-4 flex justify-between items-center shadow-md">
-        <div className="flex items-center gap-2">
-          <h1 className="text-xl font-extrabold tracking-wider text-yellow-400">
-            🎮 ARENA NEPAL
-          </h1>
+        <div className="flex items-center gap-3">
+          <img 
+            src="/logo.jpg" 
+            alt="Arena Nepal Logo" 
+            className="w-10 h-10 md:w-12 md:h-12 rounded-xl object-cover border border-cyan-500/40 shadow-[0_0_15px_rgba(6,182,212,0.5)]" 
+          />
+          <span className="text-xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-pink-500 to-purple-500">
+            ARENA NEPAL
+          </span>
         </div>
 
         <nav className="flex gap-2 bg-gray-800 p-1 rounded-xl">

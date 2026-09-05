@@ -8,7 +8,10 @@ const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export default function RankPage() {
   const [currentUserName, setCurrentUserName] = useState('Player');
-  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'daily' | 'night'>('daily');
+  
+  const [dailyLeaderboard, setDailyLeaderboard] = useState<any[]>([]);
+  const [nightLeaderboard, setNightLeaderboard] = useState<any[]>([]);
   
   const [userRankData, setUserRankData] = useState({
     rank: '--',
@@ -17,83 +20,81 @@ export default function RankPage() {
     points: '0',
   });
 
-  // Supabase से Top 10 Scores लाने का और वॉलेट में प्राइज भेजने का फंक्शन
-  const fetchLeaderboardFromSupabase = async () => {
+  // Supabase से Daily (Top 10) और Night (Top 15) का डेटा लाने का फंक्शन
+  const fetchRankingsFromSupabase = async () => {
     try {
-      const { data, error } = await supabase
+      // 1. Fetch Daily Tournament Scores (Limit 10, Prize NPR 1,000)
+      const { data: dailyData, error: dailyError } = await supabase
         .from('tournament_scores')
         .select('*')
         .order('score', { ascending: false })
         .limit(10);
 
-      if (error) {
-        console.error('Error fetching leaderboard:', error.message);
-        return;
-      }
-
-      if (data) {
-        const formattedData = data.map((item: any, index: number) => ({
+      if (!dailyError && dailyData) {
+        const formattedDaily = dailyData.map((item: any, index: number) => ({
           rank: index + 1,
           name: item.username || 'Player',
           points: item.score?.toString() || '0',
-          prize: index < 10 ? 'NPR 1,000' : 'NPR 0',
+          prize: 'NPR 1,000',
         }));
-
-        setLeaderboardData(formattedData);
-
-        const myIndex = formattedData.findIndex((item: any) => item.name === currentUserName);
-        if (myIndex !== -1) {
-          const calculatedPrize = myIndex < 10 ? 1000 : 0;
-
-          setUserRankData({
-            rank: `#${myIndex + 1}`,
-            name: `${currentUserName} (YOU)`,
-            prize: `NPR ${calculatedPrize}`,
-            points: formattedData[myIndex].points,
-          });
-
-          // अगर यूजर टॉप 10 में है, तो उसका 1000 रुपया वॉलेट में ऑटोमैटिक जोड़ दें
-          if (calculatedPrize > 0) {
-            try {
-              const existingCash = parseInt(localStorage.getItem('arena_winning_cash') || '0', 10);
-              // हम यह सुनिश्चित करते हैं कि प्राइज सिर्फ एक बार ही जुड़े (फ्लैग के जरिए)
-              const claimedKey = `prize_claimed_${new Date().toDateString()}`;
-              const alreadyClaimed = localStorage.getItem(claimedKey);
-
-              if (!alreadyClaimed) {
-                const newTotalCash = existingCash + calculatedPrize;
-                localStorage.setItem('arena_winning_cash', newTotalCash.toString());
-                localStorage.setItem('arena_cash', newTotalCash.toString()); // वॉलेट के दूसरे फॉर्मेट के लिए
-                localStorage.setItem(claimedKey, 'true');
-                console.log('🏆 Congratulations! NPR 1000 added to your wallet balance.');
-              }
-            } catch (err) {
-              console.error('Wallet update error:', err);
-            }
-          }
-        }
+        setDailyLeaderboard(formattedDaily);
       }
+
+      // 2. Fetch Night Tournament Scores (Limit 15, Prize NPR 1,500)
+      const { data: nightData, error: nightError } = await supabase
+        .from('tournament_scores')
+        .select('*')
+        .order('score', { ascending: false })
+        .limit(15);
+
+      if (!nightError && nightData) {
+        const formattedNight = nightData.map((item: any, index: number) => ({
+          rank: index + 1,
+          name: item.username || 'Player',
+          points: item.score?.toString() || '0',
+          prize: 'NPR 1,500',
+        }));
+        setNightLeaderboard(formattedNight);
+      }
+
+      // Set Active View User Rank based on selected tab
+      const currentList = activeTab === 'daily' ? dailyLeaderboard : nightLeaderboard;
+      const myIndex = currentList.findIndex((item: any) => item.name === currentUserName);
+      
+      if (myIndex !== -1) {
+        const prizeAmount = activeTab === 'daily' ? 'NPR 1,000' : 'NPR 1,500';
+        setUserRankData({
+          rank: `#${myIndex + 1}`,
+          name: `${currentUserName} (YOU)`,
+          prize: prizeAmount,
+          points: currentList[myIndex].points,
+        });
+      }
+
     } catch (err) {
-      console.error('Unexpected error:', err);
+      console.error('Unexpected error fetching rankings:', err);
     }
   };
 
   useEffect(() => {
-    fetchLeaderboardFromSupabase();
+    fetchRankingsFromSupabase();
 
-    // ⏰ शाम के 7:00 बजे (7:00 PM) ऑटोमैटिक अपडेट चेक करने वाला लॉजिक
-    const checkSevenPMUpdate = setInterval(() => {
+    // ⏰ ऑटोमैटिक टाइम चेक (शाम 7:00 बजे और सुबह 7:00 बजे रिफ्रेश करने के लिए)
+    const checkTimeInterval = setInterval(() => {
       const now = new Date();
       const hours = now.getHours();
       const minutes = now.getMinutes();
 
-      if (hours === 19 && minutes === 0) {
-        fetchLeaderboardFromSupabase();
+      // Evening 7:00 PM or Morning 7:00 AM
+      if ((hours === 19 || hours === 7) && minutes === 0) {
+        fetchRankingsFromSupabase();
       }
     }, 60000);
 
-    return () => clearInterval(checkSevenPMUpdate);
-  }, []);
+    return () => clearInterval(checkTimeInterval);
+  }, [activeTab]);
+
+  const displayedList = activeTab === 'daily' ? dailyLeaderboard : nightLeaderboard;
 
   return (
     <div className="min-h-screen bg-[#0B0F19] text-white flex flex-col items-center pb-32 px-4 pt-6 select-none relative">
@@ -103,32 +104,51 @@ export default function RankPage() {
       <p className="text-xs text-gray-400 mb-1">Check out top rankings 🏆</p>
       
       <p className="text-[11px] text-yellow-400 font-bold mb-4 bg-yellow-950/40 border border-yellow-500/30 px-3 py-1.5 rounded-xl text-center">
-        🇳🇵 दैनिक प्रतियोगिताको नतिजा हरेक दिन साँझ ७:०० बजे प्रकाशित गरिनेछ।
+        {activeTab === 'daily' 
+          ? '🇳🇵 दैनिक प्रतियोगिताको नतिजा हरेक दिन साँझ ७:०० बजे प्रकाशित गरिनेछ।' 
+          : '🇳🇵 रात्रीकालीन प्रतियोगिताको नतिजा हरेक दिन बिहान ७:०० बजे प्रकाशित गरिनेछ।'}
       </p>
 
-      {/* DAILY टैब */}
-      <div className="flex bg-gray-900 p-1 rounded-xl mb-6 border border-gray-800">
+      {/* DAILY & NIGHT SWITCH TABS */}
+      <div className="flex bg-gray-900 p-1 rounded-xl mb-6 border border-gray-800 gap-2">
         <button
-          className="px-4 py-1.5 rounded-lg text-xs font-bold uppercase bg-gradient-to-r from-pink-500 to-purple-600 text-white shadow"
+          onClick={() => setActiveTab('daily')}
+          className={`px-5 py-2 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
+            activeTab === 'daily'
+              ? 'bg-gradient-to-r from-pink-500 to-purple-600 text-white shadow-lg'
+              : 'text-gray-400 hover:text-white'
+          }`}
         >
-          DAILY
+          ☀️ Daily (Top 10)
+        </button>
+        <button
+          onClick={() => setActiveTab('night')}
+          className={`px-5 py-2 rounded-lg text-xs font-black uppercase transition-all cursor-pointer ${
+            activeTab === 'night'
+              ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg'
+              : 'text-gray-400 hover:text-white'
+          }`}
+        >
+          🌙 Night (Top 15)
         </button>
       </div>
 
       {/* List */}
       <div className="w-full max-w-md flex flex-col gap-2 mb-4">
-        {leaderboardData.length === 0 ? (
+        {displayedList.length === 0 ? (
           <div className="w-full bg-gray-900/40 border border-gray-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center gap-2">
             <span className="text-2xl">📊</span>
             <p className="text-xs text-gray-300 font-bold">
-              No rankings yet for this tournament cycle!
+              No rankings yet for this {activeTab} tournament cycle!
             </p>
             <p className="text-[10px] text-gray-500">
-              Play games & score points to get on the leaderboard. Updates daily at 7:00 PM.
+              {activeTab === 'daily' 
+                ? 'Play games to get on Top 10. Updates daily at 7:00 PM.' 
+                : 'Play cyber tower games to get on Top 15. Updates daily at 7:00 AM.'}
             </p>
           </div>
         ) : (
-          leaderboardData.map((item: any) => {
+          displayedList.map((item: any) => {
             const isMe = item.name === currentUserName;
             return (
               <div
@@ -190,7 +210,7 @@ export default function RankPage() {
             </span>
             <div>
               <p className="text-xs font-black text-yellow-400 flex items-center gap-1.5">
-                YOUR RANK
+                YOUR RANK ({activeTab.toUpperCase()})
                 <span className="bg-yellow-400/20 text-yellow-300 text-[9px] px-1.5 py-0.5 rounded font-bold">
                   YOU
                 </span>
