@@ -12,6 +12,8 @@ import WalletSection from '@/components/WalletSection';
 import RankSection from '@/components/RankSection';
 import LuckySpinWheel from '@/components/LuckySpinWheel';
 import DailyMissions from '@/components/DailyMissions';
+import AuthModal from '@/components/AuthModal';
+import { supabase } from '@/lib/supabase';
 
 import { getWalletBalance } from '@/lib/wallet';
 
@@ -27,7 +29,7 @@ const DUMMY_WINNERS = [
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'home' | 'tournament' | 'rank' | 'wallet'>('home');
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
-  const [lobbyBalance, setLobbyBalance] = useState<number>(150);
+  const [lobbyBalance, setLobbyBalance] = useState<number>(0);
   const [dailyClaimed, setDailyClaimed] = useState<boolean>(false);
   
   // State for Floating Spin Wheel Popup Widget
@@ -42,17 +44,39 @@ export default function Home() {
   // 🔴 Live Winner Ticker State
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState<number>(0);
 
+  // 🔒 Auth States for Login / Register Popup Overlay
+  const [session, setSession] = useState<any>(null);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
+
   useEffect(() => {
-    // 🔴 सभी रेड डायमंड्स कीज़ से सही बैलेंस लोड करें
+    // 🔒 Check Supabase User Session
+    const checkUserSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setSession(session);
+      if (!session) {
+        setShowAuthModal(true);
+      }
+    };
+
+    checkUserSession();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        setShowAuthModal(false);
+      }
+    });
+
+    // 🔴 सभी रेड डायमंड्स कीज़ से सही बैलेंस लोड करें (डिफ़ॉल्ट 0)
     const getRedBalance = () => {
       try {
         const val = localStorage.getItem('arena_red_diamonds') || 
                     localStorage.getItem('arena_red_dias') || 
                     localStorage.getItem('arena_diamond') || 
                     localStorage.getItem('arena_cash');
-        return val ? parseInt(val, 10) : 150;
+        return val ? parseInt(val, 10) : 0;
       } catch (e) {
-        return 150;
+        return 0;
       }
     };
 
@@ -90,6 +114,7 @@ export default function Home() {
     }, 3500);
 
     return () => {
+      subscription.unsubscribe();
       window.removeEventListener('walletUpdated', handleWalletUpdate);
       window.removeEventListener('storage', handleWalletUpdate);
       clearInterval(playerInterval);
@@ -114,7 +139,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center pb-24 select-none relative">
       {/* Top Header / Lobby Bar with Live Balance */}
-      <header className="w-full max-w-md p-4 flex items-center justify-between border-b border-gray-800 bg-gray-900/80 backdrop-blur-md sticky top-0 z-50 shadow-lg">
+      <header className="w-full max-w-md p-4 flex items-center justify-between border-b border-gray-800 bg-gray-900/80 backdrop-blur-md sticky top-0 z-40 shadow-lg">
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">
             <span className="text-base animate-pulse">⚡</span>
@@ -131,10 +156,19 @@ export default function Home() {
         </div>
         
         <div className="flex items-center gap-2.5">
-          <div className="flex items-center gap-1.5 bg-gradient-to-r from-red-950/80 to-purple-950/80 px-3 py-1.5 rounded-xl border border-red-500/40 shadow-inner">
-            <span className="text-xs">🔴</span>
-            <span className="text-xs font-black text-red-400">{lobbyBalance}</span>
-          </div>
+          {session ? (
+            <div className="flex items-center gap-1.5 bg-gradient-to-r from-red-950/80 to-purple-950/80 px-3 py-1.5 rounded-xl border border-red-500/40 shadow-inner">
+              <span className="text-xs">🔴</span>
+              <span className="text-xs font-black text-red-400">{lobbyBalance}</span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowAuthModal(true)}
+              className="text-[10px] font-black bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-black px-3 py-1.5 rounded-xl shadow-lg hover:scale-105 transition-all cursor-pointer"
+            >
+              Login / Register
+            </button>
+          )}
 
           {selectedGame && (
             <button 
@@ -355,8 +389,25 @@ export default function Home() {
         <DailyMissions onClose={() => setShowDailyMissions(false)} />
       )}
 
+      {/* 🔒 LOGIN / REGISTER MODAL POPUP OVERLAY */}
+      {showAuthModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="relative w-full max-w-sm bg-gray-900 border border-yellow-500/50 rounded-3xl p-5 shadow-2xl animate-in fade-in zoom-in duration-200">
+            {session && (
+              <button
+                onClick={() => setShowAuthModal(false)}
+                className="absolute top-3 right-3 bg-red-600/80 hover:bg-red-600 text-white w-7 h-7 rounded-full font-bold flex items-center justify-center text-xs shadow transition-all cursor-pointer z-10"
+              >
+                ✕
+              </button>
+            )}
+            <AuthModal isOpen={true} onClose={() => setShowAuthModal(false)} />
+          </div>
+        </div>
+      )}
+
       {/* 🎡 FLOATING LUCKY SPIN WIDGET (Corner Popup Style) */}
-      <div className="fixed bottom-20 right-4 z-50 flex flex-col items-end">
+      <div className="fixed bottom-20 right-4 z-40 flex flex-col items-end">
         {!showSpinPopup && (
           <button
             onClick={() => setShowSpinPopup(true)}
@@ -390,7 +441,7 @@ export default function Home() {
       </div>
 
       {/* Bottom Navigation Bar */}
-      <nav className="w-full max-w-md fixed bottom-0 bg-gray-950/90 backdrop-blur-md border-t border-gray-800 flex items-center justify-around py-2.5 z-50 shadow-2xl">
+      <nav className="w-full max-w-md fixed bottom-0 bg-gray-950/90 backdrop-blur-md border-t border-gray-800 flex items-center justify-around py-2.5 z-40 shadow-2xl">
         <button onClick={() => { setActiveTab('home'); setSelectedGame(null); }} className={`flex flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'home' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
           <span className="text-xl">🏠</span>
           <span className="text-[10px] mt-0.5 font-bold">Home</span>
