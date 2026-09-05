@@ -41,12 +41,12 @@ export default function RockPaperScissors() {
     { id: 'scissors', label: 'Scissors', emoji: '✌️', bg: 'from-purple-600 to-pink-700' },
   ];
 
-  // Web Audio API helper for crisp tick sound during countdown
+  // Web Audio API helper for crisp tick sound during countdown (TypeScript Safe)
   const playTickSound = () => {
     try {
-      const AudioContext = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
