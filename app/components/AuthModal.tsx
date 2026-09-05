@@ -3,11 +3,18 @@
 import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
 
-export default function AuthModal() {
+interface AuthModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+
+  if (!isOpen) return null;
 
   // Email/Password Sign Up
   const handleSignUp = async (e: React.MouseEvent<HTMLButtonElement>) => {
@@ -65,7 +72,15 @@ export default function AuthModal() {
   };
 
   return (
-    <div className="w-full">
+    <div className="w-full relative">
+        {/* Close Button if needed */}
+        <button 
+          onClick={onClose}
+          className="absolute top-0 right-0 text-gray-400 hover:text-white text-sm font-bold px-2 py-1"
+        >
+          ✕
+        </button>
+
         {message && (
           <div className="mb-4 p-3 bg-gray-800 border border-yellow-500/50 rounded text-sm text-center text-yellow-200">
             {message}
