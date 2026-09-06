@@ -45,6 +45,7 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
   const [withdrawAccountNo, setWithdrawAccountNo] = useState<string>('');
   const [withdrawAccountName, setWithdrawAccountName] = useState<string>('');
   const [withdrawAmount, setWithdrawAmount] = useState<string>('500');
+  const [withdrawQrFile, setWithdrawQrFile] = useState<string>(''); // 👈 QR Upload State for all methods
 
   // Red Diamond Exchange Modal State
   const [showExchangeModal, setShowExchangeModal] = useState<boolean>(false);
@@ -66,40 +67,54 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
 
   // Fetch real-time data from Supabase profiles & history
-  const fetchUserData = async (uid: string) => {
+  const fetchUserData = async () => {
     try {
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_uid', uid)
-        .single();
+      // Get currently authenticated Supabase user session
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session && session.user) {
+        const authUser = session.user;
 
-      if (profileData) {
-        if (profileData.winning_cash !== undefined && profileData.winning_cash !== null) {
-          setWinningCash(profileData.winning_cash);
+        // Fetch from 'profiles' table using auth user id
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authUser.id)
+          .single();
+
+        if (profileData) {
+          // Automatic Unique UID fetched directly from database profiles table!
+          if (profileData.uid) {
+            setGameUid(profileData.uid);
+            localStorage.setItem('arena_user_uid', profileData.uid);
+          }
+          if (profileData.winning_cash !== undefined && profileData.winning_cash !== null) {
+            setWinningCash(profileData.winning_cash);
+          }
+          if (profileData.username) setUserName(profileData.username);
+          if (profileData.email) setUserEmail(profileData.email);
+          if (profileData.mobile_number) setUserMobile(profileData.mobile_number);
+          if (profileData.city) setUserCity(profileData.city);
+          if (profileData.district) setUserDistrict(profileData.district);
+          if (profileData.zip_code) setUserZip(profileData.zip_code);
+
+          // Fetch withdraw history for this specific user UID
+          const { data: historyData } = await supabase
+            .from('withdraw_requests')
+            .select('*')
+            .eq('user_uid', profileData.uid)
+            .order('created_at', { ascending: false });
+
+          if (historyData) {
+            const formattedHistory: HistoryItem[] = historyData.map((item: any) => ({
+              type: 'Withdraw Request',
+              details: `NPR ${item.amount} via ${item.method || 'eSewa'} (${item.account_no})`,
+              date: new Date(item.created_at).toLocaleDateString(),
+              status: item.status,
+            }));
+            setHistoryList(formattedHistory);
+          }
         }
-        if (profileData.username) setUserName(profileData.username);
-        if (profileData.email) setUserEmail(profileData.email);
-        if (profileData.mobile_number) setUserMobile(profileData.mobile_number);
-        if (profileData.city) setUserCity(profileData.city);
-        if (profileData.district) setUserDistrict(profileData.district);
-        if (profileData.zip_code) setUserZip(profileData.zip_code);
-      }
-
-      const { data: historyData } = await supabase
-        .from('withdraw_requests')
-        .select('*')
-        .eq('user_uid', uid)
-        .order('created_at', { ascending: false });
-
-      if (historyData) {
-        const formattedHistory: HistoryItem[] = historyData.map((item: any) => ({
-          type: 'Withdraw Request',
-          details: `NPR ${item.amount} via ${item.method || 'eSewa'} (${item.account_no})`,
-          date: new Date(item.created_at).toLocaleDateString(),
-          status: item.status,
-        }));
-        setHistoryList(formattedHistory);
       }
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -132,10 +147,10 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     const savedCash = localStorage.getItem('arena_winning_cash');
 
     if (savedName) setUserName(savedName);
-    if (savedUid) {
-      setGameUid(savedUid);
-      fetchUserData(savedUid);
-    }
+    if (savedUid) setGameUid(savedUid);
+
+    // Call Supabase user data sync
+    fetchUserData();
 
     if (savedWhite) setWhiteDiamonds(Number(savedWhite));
     else {
@@ -201,20 +216,35 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     localStorage.setItem('arena_user_district', updatedDistrict);
     localStorage.setItem('arena_user_zip', updatedZip);
 
-    await supabase
-      .from('profiles')
-      .update({
-        username: updatedName,
-        email: updatedEmail,
-        mobile_number: updatedMobile,
-        city: updatedCity,
-        district: updatedDistrict,
-        zip_code: updatedZip,
-      })
-      .eq('user_uid', gameUid);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      await supabase
+        .from('profiles')
+        .update({
+          username: updatedName,
+          email: updatedEmail,
+          mobile_number: updatedMobile,
+          city: updatedCity,
+          district: updatedDistrict,
+          zip_code: updatedZip,
+        })
+        .eq('id', session.user.id);
+    }
 
     setShowProfileModal(false);
     alert('Profile successfully updated!');
+  };
+
+  // QR Image File Upload Handler for all withdrawal methods
+  const handleQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setWithdrawQrFile(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleWithdrawSubmit = async (e: React.FormEvent) => {
@@ -236,7 +266,7 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
       return;
     }
 
-    // Supabase insert with fallback safety so it doesn't break if table schema has minor variations
+    // Insert withdraw request into Supabase table
     const { error } = await supabase.from('withdraw_requests').insert([
       {
         user_uid: gameUid,
@@ -251,18 +281,20 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
 
     if (error) {
       console.error('Supabase error:', error);
-      // Even if database table row insertion fails due to table rules, we process local withdrawal so user experience isn't blocked
     }
 
-    // Deduct cash automatically from state and localStorage
+    // Automatically deduct cash from state, localStorage, and Supabase database profiles table
     const updatedCash = winningCash - amountNum;
     setWinningCash(updatedCash);
     localStorage.setItem('arena_winning_cash', updatedCash.toString());
 
-    await supabase
-      .from('profiles')
-      .update({ winning_cash: updatedCash })
-      .eq('user_uid', gameUid);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      await supabase
+        .from('profiles')
+        .update({ winning_cash: updatedCash })
+        .eq('id', session.user.id);
+    }
 
     // Add to local history list
     setHistoryList((prev: HistoryItem[]) => [
@@ -278,9 +310,9 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     setShowWithdrawModal(false);
     alert('Withdrawal request submitted successfully! Redirecting to WhatsApp...');
 
-    // Open WhatsApp with complete details
+    // Open WhatsApp with complete details including payment method and QR info
     const whatsappNumber = '9779716782200';
-    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AMethod: ${withdrawMethod}%0AAccount/Number: ${withdrawAccountNo}%0AHolder Name: ${withdrawAccountName}%0AAmount: NPR ${withdrawAmount}`;
+    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AMethod: ${withdrawMethod}%0AAccount/Number: ${withdrawAccountNo}%0AHolder Name: ${withdrawAccountName}%0AAmount: NPR ${withdrawAmount}%0AQR Attached: ${withdrawQrFile ? 'Yes' : 'No'}`;
     window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
   };
 
@@ -299,14 +331,18 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     setWinningCash(newCash);
     localStorage.setItem('arena_winning_cash', newCash.toString());
 
-    supabase
-      .from('profiles')
-      .update({
-        red_diamonds: newRed,
-        winning_cash: newCash,
-      })
-      .eq('user_uid', gameUid)
-      .then();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session && session.user) {
+        supabase
+          .from('profiles')
+          .update({
+            red_diamonds: newRed,
+            winning_cash: newCash,
+          })
+          .eq('id', session.user.id)
+          .then();
+      }
+    });
 
     alert(`Successfully exchanged ${count} Red Diamonds for NPR ${addedCash} Cash!`);
     setShowExchangeModal(false);
@@ -357,13 +393,13 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         </button>
       </div>
 
-      {/* Profile Card */}
+      {/* Profile Card with Unique UID Display */}
       <div className="w-full bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex flex-col gap-3 shadow-lg">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-sm font-bold">{userName}</h2>
             <div className="flex items-center gap-2 mt-1">
-              <p className="text-[10px] text-gray-400">UID: {gameUid}</p>
+              <p className="text-[10px] text-cyan-400 font-bold">UID: {gameUid}</p>
               <button
                 onClick={handleCopyUid}
                 className="px-2 py-0.5 bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 text-[9px] font-bold rounded hover:bg-cyan-500 hover:text-black transition-all cursor-pointer"
@@ -685,7 +721,7 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         </div>
       )}
 
-      {/* WITHDRAW MODAL */}
+      {/* WITHDRAW MODAL WITH AUTOMATIC UID, QR UPLOAD FOR ALL METHODS, AND DEDUCTION LOGIC */}
       {showWithdrawModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
@@ -699,6 +735,7 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
               </button>
             </div>
 
+            {/* Payment Options Selection Bar */}
             <div className="grid grid-cols-5 gap-1 mb-4">
               {(['eSewa', 'Khalti', 'CallPay', 'ConnectIPS', 'Bank'] as const).map((method) => (
                 <button
@@ -718,13 +755,13 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
 
             <form onSubmit={handleWithdrawSubmit} className="flex flex-col gap-3 text-xs">
               <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Game UID</label>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Game UID (Automatic)</label>
                 <input
                   type="text"
                   value={gameUid}
-                  onChange={(e) => setGameUid(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
+                  readOnly
+                  className="w-full bg-black/80 border border-gray-800 text-cyan-400 font-bold p-2.5 rounded-xl cursor-not-allowed select-all"
+                  title="Your unique UID is automatically fetched from your profile."
                 />
               </div>
 
@@ -769,11 +806,27 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
                 />
               </div>
 
+              {/* QR Upload Option for ALL payment methods */}
+              <div>
+                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">
+                  Upload {withdrawMethod} QR Code (Optional/Recommended Image)
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleQrUpload}
+                  className="w-full bg-black border border-gray-800 text-gray-300 text-[10px] p-2 rounded-xl file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-green-500 file:text-black hover:file:bg-green-400 cursor-pointer"
+                />
+                {withdrawQrFile && (
+                  <p className="text-[9px] text-green-400 mt-1">✓ QR Code attached successfully</p>
+                )}
+              </div>
+
               <button
                 type="submit"
-                className="mt-2 py-3 bg-green-600 hover:bg-green-500 font-black text-xs rounded-xl text-white shadow-lg transition-all cursor-pointer"
+                className="mt-3 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:opacity-90 font-black text-xs rounded-xl text-black shadow-lg transition-all cursor-pointer"
               >
-                Submit Withdrawal Request
+                Submit Withdraw to WhatsApp
               </button>
             </form>
           </div>
@@ -783,49 +836,41 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
       {/* RED DIAMOND EXCHANGE MODAL */}
       {showExchangeModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-xs bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col">
+          <div className="w-full max-w-sm bg-gray-900 border border-red-500/40 text-white rounded-2xl p-5 shadow-2xl flex flex-col">
             <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
-              <h3 className="text-xs font-black text-red-400">🔄 EXCHANGE RED DIAMONDS</h3>
+              <h3 className="text-sm font-black text-red-400">🔄 RED DIAMOND EXCHANGE</h3>
               <button
                 onClick={() => setShowExchangeModal(false)}
-                className="text-gray-400 hover:text-white font-bold text-sm px-1 cursor-pointer"
+                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
               >
                 ✕
               </button>
             </div>
-            <p className="text-[11px] text-gray-300 mb-4">
-              Convert your Red Diamonds into instant Winning Cash (1 Red Diamond = 1 NPR).
+            <p className="text-xs text-gray-300 mb-4">
+              Convert your Red Diamonds into instant Winning Cash (1 Red Diamond = 1 NPR Cash).
             </p>
             <div className="flex flex-col gap-2">
-              <button
-                onClick={() => handleRedDiamondExchange(100)}
-                className="py-2.5 bg-red-600 hover:bg-red-500 font-bold text-xs rounded-xl text-white shadow cursor-pointer"
-              >
-                Exchange 100 Red Diamonds (NPR 100)
-              </button>
-              <button
-                onClick={() => handleRedDiamondExchange(500)}
-                className="py-2.5 bg-red-600 hover:bg-red-500 font-bold text-xs rounded-xl text-white shadow cursor-pointer"
-              >
-                Exchange 500 Red Diamonds (NPR 500)
-              </button>
-              <button
-                onClick={() => handleRedDiamondExchange(1000)}
-                className="py-2.5 bg-red-600 hover:bg-red-500 font-bold text-xs rounded-xl text-white shadow cursor-pointer"
-              >
-                Exchange 1000 Red Diamonds (NPR 1000)
-              </button>
+              {[100, 500, 1000, 2000, 5000].map((count) => (
+                <button
+                  key={count}
+                  onClick={() => handleRedDiamondExchange(count)}
+                  className="py-2.5 px-3 bg-red-950/60 border border-red-500/40 hover:bg-red-600 hover:text-black font-bold text-xs rounded-xl flex justify-between items-center transition-all cursor-pointer"
+                >
+                  <span>🔴 {count} Red Diamonds</span>
+                  <span className="text-green-400 font-black">➔ NPR {count} Cash</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
       )}
 
-      {/* SETTING MODAL */}
+      {/* SETTINGS MODAL */}
       {showSettingModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[85vh] overflow-y-auto">
+          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
-              <h3 className="text-sm font-black text-cyan-400">⚙️ APP SETTINGS</h3>
+              <h3 className="text-sm font-black text-cyan-400">⚙️ ARENA NEPAL SETTINGS</h3>
               <button
                 onClick={() => setShowSettingModal(false)}
                 className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
@@ -834,12 +879,12 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-1 bg-black/50 p-1 rounded-xl mb-4">
+            <div className="grid grid-cols-3 gap-1 bg-black p-1 rounded-xl mb-4 text-[10px] font-bold">
               {(['support', 'terms', 'about'] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setSettingTab(tab)}
-                  className={`py-2 text-[10px] font-bold uppercase rounded-lg transition-all cursor-pointer ${
+                  className={`py-2 rounded-lg uppercase transition-all cursor-pointer ${
                     settingTab === tab ? 'bg-cyan-500 text-black shadow' : 'text-gray-400 hover:text-white'
                   }`}
                 >
@@ -848,36 +893,44 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
               ))}
             </div>
 
-            {settingTab === 'support' && (
-              <div className="flex flex-col gap-3 text-xs text-gray-300">
-                <p>Need help with your deposits, withdrawals, or gameplay? Contact our 24/7 support team on WhatsApp.</p>
-                <a
-                  href="https://wa.me/9779716782200"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="py-3 bg-green-600 hover:bg-green-500 text-center text-white font-bold rounded-xl shadow block"
-                >
-                  💬 Chat on WhatsApp Support
-                </a>
-              </div>
-            )}
+            <div className="text-xs text-gray-300 flex flex-col gap-3">
+              {settingTab === 'support' && (
+                <div>
+                  <h4 className="font-bold text-cyan-400 mb-1">Customer Support</h4>
+                  <p className="text-[11px] text-gray-400 mb-3">
+                    Need help with tournaments, deposits, or withdrawals? Reach out to our official support team directly via WhatsApp.
+                  </p>
+                  <a
+                    href="https://wa.me/9779716782200?text=Hello%20Arena%20Nepal%20Support"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block text-center py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow"
+                  >
+                    💬 Chat on WhatsApp
+                  </a>
+                </div>
+              )}
 
-            {settingTab === 'terms' && (
-              <div className="flex flex-col gap-2 text-[11px] text-gray-300 leading-relaxed">
-                <p className="font-bold text-cyan-400">Terms & Conditions</p>
-                <p>1. Players must be at least 18 years old to participate in cash tournaments.</p>
-                <p>2. Minimum withdrawal amount is NPR 500 and maximum is NPR 10,000 per transaction.</p>
-                <p>3. All withdrawal requests are verified and processed securely via WhatsApp and supported payment gateways.</p>
-              </div>
-            )}
+              {settingTab === 'terms' && (
+                <div>
+                  <h4 className="font-bold text-cyan-400 mb-1">Terms & Conditions</h4>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    1. All players must provide accurate mobile and UID details.<br />
+                    2. Minimum withdrawal is NPR 500 and maximum is NPR 10,000 per request.<br />
+                    3. Fraudulent activities or fake QR code submissions will result in immediate account termination and forfeiture of wallet balance.
+                  </p>
+                </div>
+              )}
 
-            {settingTab === 'about' && (
-              <div className="flex flex-col gap-2 text-[11px] text-gray-300 leading-relaxed">
-                <p className="font-bold text-pink-400">Arena Nepal Gaming Platform</p>
-                <p>Play 1v1 arenas, climb leaderboards, spin the wheel, and cash out instantly with trusted Nepali payment gateways.</p>
-                <p className="text-[10px] text-gray-500 mt-2">Version 2.4.0 (Stable)</p>
-              </div>
-            )}
+              {settingTab === 'about' && (
+                <div>
+                  <h4 className="font-bold text-cyan-400 mb-1">About Arena Nepal</h4>
+                  <p className="text-[11px] text-gray-400 leading-relaxed">
+                    Arena Nepal is the ultimate esports and casual gaming tournament platform in Nepal. Play neon games, compete in tournaments, and win instant cash rewards!
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

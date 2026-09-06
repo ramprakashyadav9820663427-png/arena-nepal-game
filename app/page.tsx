@@ -5,8 +5,10 @@ import RockPaperScissors from '@/components/game/RockPaperScissors';
 import GameSection from '@/components/game/GameSection';
 import NeonTowerSection from '@/components/game/NeonTowerSection';
 import TeenPattiBattle from '@/components/game/TeenPattiBattle';
+import OneCardBattle from '@/components/game/OneCardBattle';
 import RocketCrashGame from '@/components/game/RocketCrashGame';
 import CarRacingGame from '@/components/game/CarRacingGame';
+import LudoGotiSprint from '@/components/game/LudoGotiSprint';
 import TournamentSection from '@/components/TournamentSection';
 import WalletSection from '@/components/WalletSection';
 import RankSection from '@/components/RankSection';
@@ -15,14 +17,13 @@ import DailyMissions from '@/components/DailyMissions';
 import AuthModal from '@/components/AuthModal';
 import { supabase } from '@/lib/supabase';
 
-import { getWalletBalance } from '@/lib/wallet';
-
 // Dummy list of recent winners for the Live Ticker
 const DUMMY_WINNERS = [
   "🔥 User 'Sam***' won 500 💎 on Lucky Spin!",
   "🚀 User 'Deepak99' cashed out at 4.2x on Rocket Crash!",
-  "🏆 User 'Pooja_X' won the 1v1 Teen Patti Battle!",
-  "💎 User 'Kiran_77' collected 200 💎 on Neon Collector!",
+  "🏆 User 'Pooja_X' won 1v1 Teen Patti Battle!",
+  "🃏 User 'Rahul_K' won 1,900 Red Diamonds on One Card!",
+  "🎲 User 'LudoKing_99' collected 3,500 Red Diamonds on Ludo Sprint!",
   "🏎️ User 'Bikash_NP' won 3.5x on Car Racing!"
 ];
 
@@ -67,7 +68,7 @@ export default function Home() {
       }
     });
 
-    // 🔴 सभी रेड डायमंड्स कीज़ से सही बैलेंस लोड करें (डिफ़ॉल्ट 0)
+    // 🟢 सभी रेड डायमंड्स कीज़ से सही बैलेंस लोड करें (डिफ़ॉल्ट 0)
     const getRedBalance = () => {
       try {
         const val = localStorage.getItem('arena_red_diamonds') || 
@@ -129,11 +130,11 @@ export default function Home() {
     setDailyClaimed(true);
 
     const currentWhite = localStorage.getItem('arena_white_diamonds');
-    const newWhiteBal = (currentWhite ? parseInt(currentWhite, 10) : 24500) + 5000;
+    const newWhiteBal = (currentWhite ? parseInt(currentWhite, 10) : 24500) + 1000;
     localStorage.setItem('arena_white_diamonds', newWhiteBal.toString());
     window.dispatchEvent(new Event('storage'));
 
-    alert('🎁 Daily Bonus Claimed! +5000 White Diamonds added to your wallet!');
+    alert('🎁 Daily Bonus Claimed! +1000 White Diamonds added to your wallet!');
   };
 
   return (
@@ -193,10 +194,14 @@ export default function Home() {
               <NeonTowerSection onBackToLobby={() => setSelectedGame(null)} />
             ) : selectedGame === 'teenpatti' ? (
               <TeenPattiBattle onBackToLobby={() => setSelectedGame(null)} />
+            ) : selectedGame === 'onecard' ? (
+              <OneCardBattle onBackToLobby={() => setSelectedGame(null)} />
             ) : selectedGame === 'rocket' ? (
               <RocketCrashGame onBackToLobby={() => setSelectedGame(null)} />
             ) : selectedGame === 'carracing' ? (
               <CarRacingGame onBackToLobby={() => setSelectedGame(null)} />
+            ) : selectedGame === 'ludogoti' ? (
+              <LudoGotiSprint onBackToLobby={() => setSelectedGame(null)} />
             ) : (
               <div className="w-full flex flex-col gap-4">
                 
@@ -256,7 +261,7 @@ export default function Home() {
                       <span className="text-lg">🎁</span>
                       <div>
                         <p className="text-[11px] font-bold text-white">Daily Login Bonus</p>
-                        <p className="text-[9px] text-cyan-400 font-semibold">+5000 White Diamonds Free</p>
+                        <p className="text-[9px] text-cyan-400 font-semibold">+1000 White Diamonds Free</p>
                       </div>
                     </div>
                     <button
@@ -278,97 +283,179 @@ export default function Home() {
                   <h3 className="text-xs font-black text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                     <span>⚡</span> Featured Arcade Games
                   </h3>
-                  <span className="text-[10px] text-cyan-400 font-bold">6 Games Available</span>
+                  <span className="text-[10px] text-cyan-400 font-bold">8 Games Available</span>
                 </div>
 
-                {/* Games Grid */}
+                {/* Games Grid (Neon Diamond Collector placed right where you marked in the image grid) */}
                 <div className="grid grid-cols-2 gap-3.5 w-full">
-                  <div 
-                    onClick={() => setSelectedGame('rps')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">Hot</div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">✊</div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Rock • Paper • Scissors</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Fast 1v1 Diamond Battle</p>
-                    </div>
-                    <div className="mt-4 flex justify-end">
-                      <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-orange-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  <div 
-                    onClick={() => setSelectedGame('neon')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-cyan-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 hover:shadow-cyan-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30">Free</div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">💎</div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Diamond Collector</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Collect free diamonds</p>
-                    </div>
-                    <div className="mt-4 flex justify-end">
-                      <span className="text-[10px] font-black bg-gradient-to-r from-cyan-400 to-blue-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  <div 
-                    onClick={() => setSelectedGame('neontower')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-red-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-red-400 hover:shadow-red-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">Action</div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-red-500 to-rose-700 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">🗼</div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Tower Sprint</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">1v1 Red Diamond Sprint</p>
-                    </div>
-                    <div className="mt-4 flex justify-end">
-                      <span className="text-[10px] font-black bg-gradient-to-r from-red-500 to-rose-600 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
+                  
+                  {/* 1. Teen Patti Left vs Right */}
                   <div 
                     onClick={() => setSelectedGame('teenpatti')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-yellow-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-yellow-400 hover:shadow-yellow-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-yellow-500/60 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-yellow-400 hover:shadow-yellow-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
                   >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-500/30">Cards</div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-yellow-500 to-amber-700 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">🃏</div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Teen Patti Left vs Right</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">15s Timer & 3-Patti Battle</p>
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-500/30 flex items-center gap-1">
+                      <span>🃏</span> 3 Aces Hot
                     </div>
-                    <div className="mt-4 flex justify-end">
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-yellow-500 to-amber-700 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform relative">
+                        🎴
+                        <span className="absolute -bottom-1 -right-1 bg-red-600 text-[8px] text-white font-black px-1 rounded shadow">A♠</span>
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Teen Patti Left vs Right</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">3 Bada Taash Ekka (Aces) Battle</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-yellow-300 font-bold bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/20">🔥 15s Timer</span>
                       <span className="text-[10px] font-black bg-gradient-to-r from-yellow-400 to-amber-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
                     </div>
                   </div>
 
+                  {/* 2. Neon Rocket Crash */}
                   <div 
                     onClick={() => setSelectedGame('rocket')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-cyan-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 hover:shadow-cyan-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-cyan-500/60 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 hover:shadow-cyan-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
                   >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30">Popular</div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-cyan-400 to-indigo-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">🚀</div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Rocket Crash ⚡</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Aviator-style multiplier flight.</p>
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30 flex items-center gap-1">
+                      <span>🚀</span> 10x Mega Chip
                     </div>
-                    <div className="mt-4 flex justify-end">
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-cyan-400 to-indigo-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform relative">
+                        🚀
+                        <span className="absolute -bottom-1 -right-1 bg-cyan-500 text-[8px] text-black font-black px-1 rounded shadow">10x</span>
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Rocket Crash ⚡</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Aviator-style high multiplier flight.</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-cyan-300 font-bold bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">⚡ Live Multiplier</span>
                       <span className="text-[10px] font-black bg-gradient-to-r from-cyan-400 to-blue-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
                     </div>
                   </div>
 
+                  {/* 3. Rock • Paper • Scissors */}
+                  <div 
+                    onClick={() => setSelectedGame('rps')}
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      ✊ 1v1 Arena
+                    </div>
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
+                        ✊
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Rock • Paper • Scissors</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Fast hand-sign Diamond battle</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">⚡ Instant Win</span>
+                      <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-orange-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
+                    </div>
+                  </div>
+
+                  {/* 4. Neon Diamond Collector (Placed right here in the grid slot as marked in your screenshot!) */}
+                  <div 
+                    onClick={() => setSelectedGame('neon')}
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-cyan-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 hover:shadow-cyan-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30">
+                      💎 Free Arcade
+                    </div>
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
+                        💎
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Diamond Collector</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Collect free diamonds & bonus rewards</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-cyan-300 font-bold bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">✨ Free Play</span>
+                      <span className="text-[10px] font-black bg-gradient-to-r from-cyan-400 to-blue-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
+                    </div>
+                  </div>
+
+                  {/* 5. One Card High Battle */}
+                  <div 
+                    onClick={() => setSelectedGame('onecard')}
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-red-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-red-400 hover:shadow-red-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
+                      🎴 Single Ace
+                    </div>
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-red-600 to-rose-800 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform relative">
+                        🎴
+                        <span className="absolute -bottom-1 -right-1 bg-yellow-400 text-[8px] text-black font-black px-1 rounded shadow">A♥</span>
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">One Card High Battle</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Seedha ek bada Ekka (Ace) bet</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-red-300 font-bold bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">🔥 High Reward</span>
+                      <span className="text-[10px] font-black bg-gradient-to-r from-red-500 to-rose-600 text-white px-3 py-1.5 rounded-xl shadow">Play Now</span>
+                    </div>
+                  </div>
+
+                  {/* 6. Neon Car Racing */}
                   <div 
                     onClick={() => setSelectedGame('carracing')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
                   >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">3.5x</div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-red-600 to-yellow-500 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">🏎️</div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Car Racing 🏁</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Pick car & win up to 3.5x!</p>
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      🏎️ 3.5x Mode
                     </div>
-                    <div className="mt-4 flex justify-end">
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-red-600 to-yellow-500 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
+                        🏎️
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Car Racing 🏁</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Car racing action mode up to 3.5x</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-yellow-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">🏁 Speed Rush</span>
+                      <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-yellow-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
+                    </div>
+                  </div>
+
+                  {/* 7. Neon Tower Sprint */}
+                  <div 
+                    onClick={() => setSelectedGame('neontower')}
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-red-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-red-400 hover:shadow-red-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
+                      🗼 Tower Sprint
+                    </div>
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-red-500 to-rose-700 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
+                        🗼
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Tower Sprint</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Attractive vertical climb arcade</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-red-300 font-bold bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">🚀 Climb High</span>
+                      <span className="text-[10px] font-black bg-gradient-to-r from-red-500 to-rose-600 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
+                    </div>
+                  </div>
+
+                  {/* 8. Ludo Goti Sprint */}
+                  <div 
+                    onClick={() => setSelectedGame('ludogoti')}
+                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
+                  >
+                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
+                      🎲 Ludo Goti
+                    </div>
+                    <div>
+                      <div className="w-11 h-11 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
+                        🎲
+                      </div>
+                      <h3 className="text-xs font-black text-white leading-tight mb-1">Ludo Goti Sprint</h3>
+                      <p className="text-[10px] text-gray-400 leading-snug">Ludo board gotiyan & sprint vibe</p>
+                    </div>
+                    <div className="mt-4 flex justify-between items-center">
+                      <span className="text-[9px] text-yellow-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">🎯 Board Sprint</span>
                       <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-yellow-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
                     </div>
                   </div>
@@ -450,7 +537,7 @@ export default function Home() {
           <span className="text-xl">🏆</span>
           <span className="text-[10px] mt-0.5 font-bold">Tournament</span>
         </button>
-        <button onClick={() => { setActiveTab('rank'); setSelectedGame(null); }} className={`flex flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'rank' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
+        <button onClick={() => { setActiveTab('rank'); setSelectedGame(null); }} className={`flex quer flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'rank' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
           <span className="text-xl">⭐</span>
           <span className="text-[10px] mt-0.5 font-bold">Rank</span>
         </button>
