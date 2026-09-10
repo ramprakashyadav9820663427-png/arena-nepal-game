@@ -37,7 +37,6 @@ export default function Navbar({
           </div>
 
           <div className="ml-2">
-            <LanguageSelector currentLang={currentLang} onToggle={setCurrentLang} />
           </div>
         </div>
 
