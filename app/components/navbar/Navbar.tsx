@@ -2,8 +2,7 @@
 
 import React, { useState } from 'react';
 import { UserWallet, TabType } from '../../types/game';
-import AuthModal from '../AuthModal';
-import { LanguageSelector } from './LanguageSelector';
+import AuthModal from '../AuthModal'; 
 import { translations } from '../../lib/translations';
 
 interface NavbarProps {
