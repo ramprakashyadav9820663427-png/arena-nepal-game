@@ -1,14 +1,18 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { useLanguage } from '../context/LanguageContext';
 
 const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
 const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+type TournamentType = 'NONE' | 'DAILY' | 'NIGHT' | 'MEGA';
+
 export default function TournamentSection() {
+  const { t } = useLanguage();
   const [redDiamonds, setRedDiamonds] = useState(150);
-  const [activeTournament, setActiveTournament] = useState<'NONE' | 'DAILY' | 'NIGHT'>('NONE');
+  const [activeTournament, setActiveTournament] = useState<TournamentType>('NONE');
 
   // Lobby vs Actual Game Flow state
   const [inLobby, setInLobby] = useState(false);
@@ -20,6 +24,7 @@ export default function TournamentSection() {
   const [gameOver, setGameOver] = useState(false);
   const [isDayLocked, setIsDayLocked] = useState(false);
   const [isNightLocked, setIsNightLocked] = useState(false);
+  const [isMegaLocked, setIsMegaLocked] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const requestRef = useRef<number>(0);
@@ -27,20 +32,9 @@ export default function TournamentSection() {
   // Audio Context Ref for Web Audio API Sound Effects
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // Day Game Refs (Obstacle Dodge)
+  // Original Game Refs (Obstacle Dodge for ALL tournaments)
   const playerRef = useRef({ x: 175, y: 350, size: 20 });
   const obstaclesRef = useRef<{ x: number; y: number; size: number; speed: number }[]>([]);
-
-  // Night Game Refs (Neon Tower Stack)
-  const stackRef = useRef<{ x: number; y: number; width: number; height: number; color: string }[]>([]);
-  const movingBlockRef = useRef<{ x: number; y: number; width: number; height: number; speed: number; dir: number }>({
-    x: 50,
-    y: 100,
-    width: 140,
-    height: 20,
-    speed: 3,
-    dir: 1,
-  });
 
   // Load Red Diamonds & Check Time Windows on mount
   useEffect(() => {
@@ -69,6 +63,9 @@ export default function TournamentSection() {
       } else {
         setIsNightLocked(true);
       }
+
+      // Mega Showdown: Open 24/7
+      setIsMegaLocked(false);
     };
 
     checkTimeWindows();
@@ -77,7 +74,7 @@ export default function TournamentSection() {
   }, []);
 
   // Web Audio Sound Generator
-  const playSound = (type: 'tap' | 'score' | 'gameover') => {
+  const playSound = (type: 'score' | 'gameover') => {
     try {
       if (!audioCtxRef.current) {
         audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
@@ -92,18 +89,10 @@ export default function TournamentSection() {
 
       const now = ctx.currentTime;
 
-      if (type === 'tap') {
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(400, now);
-        osc.frequency.exponentialRampToValueAtTime(800, now + 0.1);
-        gain.gain.setValueAtTime(0.15, now);
-        gain.gain.linearRampToValueAtTime(0.01, now + 0.1);
-        osc.start(now);
-        osc.stop(now + 0.1);
-      } else if (type === 'score') {
+      if (type === 'score') {
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(587.33, now); // D5
-        osc.frequency.setValueAtTime(880, now + 0.08); // A5
+        osc.frequency.setValueAtTime(587.33, now);
+        osc.frequency.setValueAtTime(880, now + 0.08);
         gain.gain.setValueAtTime(0.2, now);
         gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
         osc.start(now);
@@ -142,17 +131,21 @@ export default function TournamentSection() {
   }, [gameStarted, gameOver, timeLeft, score]);
 
   // Handle Join Click
-  const handleJoinClick = (type: 'DAILY' | 'NIGHT') => {
+  const handleJoinClick = (type: TournamentType) => {
     if (type === 'DAILY' && isDayLocked) {
       alert('❌ Daily Tournament is locked! Opens daily from 6:00 AM to 6:00 PM.');
       return;
     }
     if (type === 'NIGHT' && isNightLocked) {
-      alert('❌ Night Cyber Tournament is locked! Opens daily from 7:30 PM to 6:00 AM.');
+      alert('❌ Night Tournament is locked! Opens daily from 7:30 PM to 6:00 AM.');
+      return;
+    }
+    if (type === 'MEGA' && isMegaLocked) {
+      alert('❌ Mega Showdown is currently locked.');
       return;
     }
 
-    const fee = type === 'DAILY' ? 100 : 200;
+    const fee = type === 'DAILY' ? 100 : type === 'NIGHT' ? 200 : 500;
     if (redDiamonds < fee) {
       alert(`❌ Not enough Red Diamonds! You need ${fee} Red Diamonds to join.`);
       return;
@@ -165,7 +158,7 @@ export default function TournamentSection() {
 
   // Start Actual Gameplay
   const startTourneyGamePlay = () => {
-    const fee = activeTournament === 'DAILY' ? 100 : 200;
+    const fee = activeTournament === 'DAILY' ? 100 : activeTournament === 'NIGHT' ? 200 : 500;
     if (redDiamonds < fee) {
       alert(`❌ Not enough Red Diamonds!`);
       return;
@@ -174,13 +167,11 @@ export default function TournamentSection() {
     const remaining = redDiamonds - fee;
     setRedDiamonds(remaining);
     
-    // 🔴 यहाँ सभी स्टोरेज कीज़ को एक साथ सिंक कर दिया गया है
     localStorage.setItem('arena_red_diamonds', remaining.toString());
     localStorage.setItem('arena_red_dias', remaining.toString());
     localStorage.setItem('arena_diamond', remaining.toString());
     localStorage.setItem('arena_cash', remaining.toString());
     
-    // ब्राउज़र को तुरंत इवेंट भेजें ताकि page.tsx (लॉबी) भी अपडेट हो जाए
     window.dispatchEvent(new Event('storage'));
 
     setInLobby(false);
@@ -189,50 +180,22 @@ export default function TournamentSection() {
     setTimeLeft(900); // 15 Mins
     setGameOver(false);
 
-    if (activeTournament === 'DAILY') {
-      playerRef.current = { x: 175, y: 350, size: 20 };
-      obstaclesRef.current = [];
-    } else {
-      // Initialize Night Tower Stack
-      stackRef.current = [
-        { x: 90, y: 360, width: 140, height: 24, color: '#00ffcc' }
-      ];
-      movingBlockRef.current = {
-        x: 40,
-        y: 330,
-        width: 140,
-        height: 24,
-        speed: 2.8,
-        dir: 1,
-      };
-    }
+    playerRef.current = { x: 175, y: 350, size: 20 };
+    obstaclesRef.current = [];
   };
 
   // Handle Restart / Continue Game on Death (Preserves Score)
   const handleRestartGame = () => {
     setGameOver(false);
-    if (activeTournament === 'DAILY') {
-      playerRef.current = { x: 175, y: 350, size: 20 };
-      obstaclesRef.current = [];
-    } else {
-      const topBlock = stackRef.current[stackRef.current.length - 1];
-      const nextY = Math.max(80, topBlock.y - 28);
-      movingBlockRef.current = {
-        x: 20,
-        y: nextY,
-        width: topBlock.width,
-        height: 24,
-        speed: 3 + Math.floor(stackRef.current.length / 5) * 0.4,
-        dir: 1,
-      };
-    }
+    playerRef.current = { x: 175, y: 350, size: 20 };
+    obstaclesRef.current = [];
   };
 
-  // Save Score to Supabase (Day vs Night Table Separation)
+  // Save Score to Supabase
   const saveScoreToSupabase = async (finalScore: number) => {
     try {
       const username = localStorage.getItem('arena_username') || 'Player';
-      const tableName = activeTournament === 'DAILY' ? 'tournament_scores' : 'night_tournament_scores';
+      const tableName = activeTournament === 'DAILY' ? 'tournament_scores' : activeTournament === 'NIGHT' ? 'night_tournament_scores' : 'mega_tournament_scores';
       
       const { error } = await supabase.from(tableName).insert([
         { user_id: 'player_local_user', username: username, score: finalScore }
@@ -256,7 +219,6 @@ export default function TournamentSection() {
     const updateGame = () => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Common Background Grid
       ctx.strokeStyle = 'rgba(0, 255, 255, 0.08)';
       ctx.lineWidth = 1;
       for (let i = 0; i < canvas.width; i += 30) {
@@ -266,74 +228,51 @@ export default function TournamentSection() {
         ctx.stroke();
       }
 
-      if (activeTournament === 'DAILY') {
-        // --- GAME 1: DAILY OBSTACLE DODGE ---
-        const spawnChance = 0.03;
-        if (Math.random() < spawnChance) {
-          obstaclesRef.current.push({
-            x: Math.random() * (canvas.width - 20),
-            y: -20,
-            size: 16 + Math.random() * 8,
-            speed: 2.2,
-          });
-        }
+      const speedMultiplier = activeTournament === 'MEGA' ? 1.5 : activeTournament === 'NIGHT' ? 1.2 : 1.0;
+      const spawnChance = activeTournament === 'MEGA' ? 0.04 : 0.03;
 
-        ctx.fillStyle = '#ff0055';
-        obstaclesRef.current.forEach((obs, index) => {
-          obs.y += obs.speed;
-          ctx.shadowBlur = 8;
-          ctx.shadowColor = '#ff0055';
-          ctx.fillRect(obs.x, obs.y, obs.size, obs.size);
-
-          const p = playerRef.current;
-          if (
-            p.x < obs.x + obs.size &&
-            p.x + p.size > obs.x &&
-            p.y < obs.y + obs.size &&
-            p.y + p.size > obs.y
-          ) {
-            setGameOver(true);
-            playSound('gameover');
-            saveScoreToSupabase(score);
-          }
-
-          if (obs.y > canvas.height) {
-            obstaclesRef.current.splice(index, 1);
-            setScore((s) => s + 10);
-          }
+      if (Math.random() < spawnChance) {
+        obstaclesRef.current.push({
+          x: Math.random() * (canvas.width - 20),
+          y: -20,
+          size: 16 + Math.random() * 8,
+          speed: 2.2 * speedMultiplier,
         });
-
-        ctx.shadowBlur = 0;
-        const p = playerRef.current;
-        ctx.fillStyle = '#00ffcc';
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = '#00ffcc';
-        ctx.fillRect(p.x, p.y, p.size, p.size);
-        ctx.shadowBlur = 0;
-
-      } else {
-        // --- GAME 2: NIGHT CYBER TOWER STACK ---
-        const mb = movingBlockRef.current;
-        mb.x += mb.speed * mb.dir;
-        if (mb.x <= 0 || mb.x + mb.width >= canvas.width) {
-          mb.dir *= -1;
-        }
-
-        // Render Stacked Blocks
-        stackRef.current.forEach((block) => {
-          ctx.fillStyle = block.color;
-          ctx.shadowBlur = 10;
-          ctx.shadowColor = block.color;
-          ctx.fillRect(block.x, block.y, block.width, block.height);
-        });
-
-        // Render Moving Block
-        ctx.fillStyle = '#ff0077';
-        ctx.shadowBlur = 12;
-        ctx.shadowColor = '#ff0077';
-        ctx.fillRect(mb.x, mb.y, mb.width, mb.height);
-        ctx.shadowBlur = 0;
       }
+
+      ctx.fillStyle = activeTournament === 'MEGA' ? '#ff3300' : '#ff0055';
+      obstaclesRef.current.forEach((obs, index) => {
+        obs.y += obs.speed;
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = activeTournament === 'MEGA' ? '#ff3300' : '#ff0055';
+        ctx.fillRect(obs.x, obs.y, obs.size, obs.size);
+
+        const p = playerRef.current;
+        if (
+          p.x < obs.x + obs.size &&
+          p.x + p.size > obs.x &&
+          p.y < obs.y + obs.size &&
+          p.y + p.size > obs.y
+        ) {
+          setGameOver(true);
+          playSound('gameover');
+          saveScoreToSupabase(score);
+        }
+
+        if (obs.y > canvas.height) {
+          obstaclesRef.current.splice(index, 1);
+          setScore((s) => s + (activeTournament === 'MEGA' ? 20 : 10));
+          playSound('score');
+        }
+      });
+
+      ctx.shadowBlur = 0;
+      const p = playerRef.current;
+      ctx.fillStyle = activeTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = activeTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
+      ctx.fillRect(p.x, p.y, p.size, p.size);
+      ctx.shadowBlur = 0;
 
       requestRef.current = requestAnimationFrame(updateGame);
     };
@@ -342,82 +281,25 @@ export default function TournamentSection() {
     return () => cancelAnimationFrame(requestRef.current);
   }, [gameStarted, gameOver, score, activeTournament]);
 
-  // Touch / Click Handler
   const handleInteraction = (
     e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
   ) => {
-    if (activeTournament === 'DAILY') {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const rect = canvas.getBoundingClientRect();
-      const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-      const x = clientX - rect.left;
-      if (x >= 0 && x <= canvas.width - playerRef.current.size) {
-        playerRef.current.x = x;
-      }
-    } else if (activeTournament === 'NIGHT' && gameStarted && !gameOver) {
-      // Tower Stack Tap Action
-      playSound('tap');
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const topBlock = stackRef.current[stackRef.current.length - 1];
-      const mb = movingBlockRef.current;
-
-      const overlapLeft = Math.max(mb.x, topBlock.x);
-      const overlapRight = Math.min(mb.x + mb.width, topBlock.x + topBlock.width);
-      const overlapWidth = overlapRight - overlapLeft;
-
-      if (overlapWidth <= 0) {
-        // Totally Missed! Game Over
-        setGameOver(true);
-        playSound('gameover');
-        saveScoreToSupabase(score);
-      } else {
-        // Successful Stack Cut
-        const newX = overlapLeft;
-        const newWidth = overlapWidth;
-        const colors = ['#00ffcc', '#0099ff', '#9900ff', '#ff00aa', '#ffcc00'];
-        const nextColor = colors[stackRef.current.length % colors.length];
-
-        stackRef.current.push({
-          x: newX,
-          y: mb.y,
-          width: newWidth,
-          height: mb.height,
-          color: nextColor,
-        });
-
-        setScore((s) => s + 50);
-        playSound('score');
-
-        // Scroll tower down if it gets too high
-        if (stackRef.current.length > 10) {
-          stackRef.current.shift();
-          stackRef.current.forEach((b) => {
-            b.y += 28;
-          });
-        }
-
-        const nextY = Math.max(80, mb.y - 28);
-        movingBlockRef.current = {
-          x: 10,
-          y: nextY,
-          width: newWidth,
-          height: 24,
-          speed: 3 + Math.floor(stackRef.current.length / 4) * 0.4,
-          dir: 1,
-        };
-      }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const x = clientX - rect.left;
+    if (x >= 0 && x <= canvas.width - playerRef.current.size) {
+      playerRef.current.x = x;
     }
   };
 
   return (
-    <div className="w-full flex flex-col items-center select-none">
+    <div className="w-full flex flex-col items-center select-none pb-10">
       {inLobby ? (
         <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-5 flex flex-col items-center shadow-2xl relative text-center">
           <h2 className="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400 uppercase mb-3">
-            ⚠️ {activeTournament === 'DAILY' ? 'DAILY TOURNAMENT LOBBY' : 'NIGHT CYBER TOWER LOBBY'} (15 MINS)
+            ⚠️ {activeTournament === 'DAILY' ? 'DAILY TOURNAMENT LOBBY' : activeTournament === 'NIGHT' ? 'NIGHT TOURNAMENT LOBBY' : 'MEGA TOURNAMENT LOBBY'} (15 MINS)
           </h2>
 
           <div className="bg-black/60 p-4 rounded-2xl border border-red-500/40 mb-5 text-left">
@@ -431,7 +313,7 @@ export default function TournamentSection() {
             onClick={startTourneyGamePlay}
             className="w-full py-3 bg-gradient-to-r from-cyan-400 to-pink-500 text-black font-black text-xs rounded-2xl shadow-lg active:scale-95 transition-all cursor-pointer"
           >
-            ▶️ START MATCH (खेल सुरु गर्नुहोस्)
+            ▶️ {t.playNow || "START MATCH"} (खेल सुरु गर्नुहोस्)
           </button>
         </div>
       ) : gameStarted ? (
@@ -465,7 +347,7 @@ export default function TournamentSection() {
                     }}
                     className="w-full py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer"
                   >
-                    Exit to Tournaments
+                    {t.back || "Exit to Tournaments"}
                   </button>
                 </div>
               </div>
@@ -477,8 +359,6 @@ export default function TournamentSection() {
               height={420}
               onMouseMove={handleInteraction}
               onTouchMove={handleInteraction}
-              onClick={handleInteraction}
-              onTouchStart={handleInteraction}
               className="cursor-crosshair touch-none"
             />
           </div>
@@ -491,19 +371,24 @@ export default function TournamentSection() {
           </div>
 
           <h2 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
-            ACTIVE TOURNAMENTS
+            {t.tournament || "ACTIVE TOURNAMENTS"}
           </h2>
 
-          {/* DAILY TOURNAMENT CARD */}
-          <div className="bg-gray-900/90 border border-purple-500/30 rounded-3xl p-4 flex flex-col gap-3 shadow-xl">
+          {/* 1. DAILY TOURNAMENT CARD (Attractive Mega Style) */}
+          <div className="bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border border-yellow-500/50 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none"></div>
             <div className="flex justify-between items-center">
-              <span className="text-xs font-black text-pink-400">DAILY TOURNAMENT</span>
-              <span className="text-[10px] bg-purple-950 text-cyan-300 px-2 py-1 rounded-xl border border-purple-500/30 font-bold">
+              <span className="text-xs font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                ☀️ DAILY TOURNAMENT (15 MINS)
+              </span>
+              <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black">
                 100 Red Dias 🔴
               </span>
             </div>
             
-            <p className="text-xs text-yellow-400 font-bold">Prize Pool: Top 10 players win NPR 1,000 each! 🏆 (15 Mins Match)</p>
+            <p className="text-xs text-yellow-300 font-bold leading-relaxed">
+              Total Prize Pool: <span className="text-white font-black">10,000 Red Diamonds</span> | Top 10 players win <span className="text-white font-black">1,000 Red Diamonds each</span>! 🏆🔥
+            </p>
 
             {isDayLocked ? (
               <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
@@ -512,23 +397,28 @@ export default function TournamentSection() {
             ) : (
               <button
                 onClick={() => handleJoinClick('DAILY')}
-                className="w-full py-2.5 bg-gradient-to-r from-cyan-400 to-pink-500 text-black font-black text-xs rounded-2xl shadow-lg active:scale-95 transition-all cursor-pointer"
+                className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
               >
-                JOIN DAILY TOURNAMENT
+                🚀 JOIN DAILY TOURNAMENT (100 Dias)
               </button>
             )}
           </div>
 
-          {/* NIGHT CYBER TOWER TOURNAMENT CARD */}
-          <div className="bg-gray-900/90 border border-purple-500/30 rounded-3xl p-4 flex flex-col gap-3 shadow-xl">
+          {/* 2. NIGHT TOURNAMENT CARD (Attractive Mega Style) */}
+          <div className="bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border border-yellow-500/50 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none"></div>
             <div className="flex justify-between items-center">
-              <span className="text-xs font-black text-cyan-400">NIGHT CYBER TOWER (15 MINS)</span>
-              <span className="text-[10px] bg-purple-950 text-pink-300 px-2 py-1 rounded-xl border border-purple-500/30 font-bold">
+              <span className="text-xs font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                🌙 NIGHT TOURNAMENT (15 MINS)
+              </span>
+              <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black">
                 200 Red Dias 🔴
               </span>
             </div>
             
-            <p className="text-xs text-yellow-400 font-bold">Prize Pool: Top 15 players win NPR 1,500 each! 🏆 (Result at 7:00 AM)</p>
+            <p className="text-xs text-yellow-300 font-bold leading-relaxed">
+              Total Prize Pool: <span className="text-white font-black">22,500 Red Diamonds</span> | Top 15 players win <span className="text-white font-black">1,500 Red Diamonds each</span>! 🏆🔥
+            </p>
 
             {isNightLocked ? (
               <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
@@ -537,9 +427,39 @@ export default function TournamentSection() {
             ) : (
               <button
                 onClick={() => handleJoinClick('NIGHT')}
-                className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-lg active:scale-95 transition-all cursor-pointer"
+                className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
               >
-                JOIN NIGHT TOURNAMENT (200 Dias)
+                🚀 JOIN NIGHT TOURNAMENT (200 Dias)
+              </button>
+            )}
+          </div>
+
+          {/* 3. MEGA SHOWDOWN CARD */}
+          <div className="bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border border-yellow-500/50 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden">
+            <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none"></div>
+            <div className="flex justify-between items-center">
+              <span className="text-xs font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1">
+                ⚡ MEGA SHOWDOWN (15 MINS)
+              </span>
+              <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black animate-pulse">
+                500 Red Dias 🔴
+              </span>
+            </div>
+            
+            <p className="text-xs text-yellow-300 font-bold leading-relaxed">
+              Total Prize Pool: <span className="text-white font-black">50,000 Red Diamonds</span> | Top 20 players win <span className="text-white font-black">2,500 Red Diamonds each</span>! 🏆🔥
+            </p>
+
+            {isMegaLocked ? (
+              <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
+                🔒 Locked
+              </div>
+            ) : (
+              <button
+                onClick={() => handleJoinClick('MEGA')}
+                className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+              >
+                🚀 JOIN MEGA TOURNAMENT (500 Dias)
               </button>
             )}
           </div>

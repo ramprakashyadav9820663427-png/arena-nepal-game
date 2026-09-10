@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-
+import { LanguageProvider } from './context/LanguageContext';
 export const metadata: Metadata = {
   title: 'Arena Nepal - Play Games, Tournaments & Win Rewards',
   description: 'Arena Nepal is the ultimate esports and gaming platform in Nepal. Play neon games, join tournaments, and win cash via eSewa.',
@@ -30,7 +30,11 @@ export default function RootLayout({
         <meta name="theme-color" content="#000000" />
         <link rel="apple-touch-icon" href="/icon.png" />
       </head>
-      <body>{children}</body>
+      <body>
+        <LanguageProvider>
+          {children}
+        </LanguageProvider>
+      </body>
     </html>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { getWalletBalance, updateWalletBalance } from '@/lib/wallet'; // 👈 Central wallet import
+import { getWalletBalance, updateWalletBalance } from '@/lib/wallet';
 
 interface UserWallet {
   redDiamonds?: number;
@@ -23,9 +23,9 @@ interface HistoryItem {
 }
 
 export default function WalletSection({ wallet, setWallet }: WalletSectionProps) {
-  const [activeTab, setActiveTab] = useState<'cash' | 'white' | 'red' | 'history'>('red');
+  // 👇 Added 'refer' to activeTab type
+  const [activeTab, setActiveTab] = useState<'deposit' | 'cash' | 'white' | 'red' | 'history' | 'refer'>('deposit');
 
-  // Profile States
   const [userName, setUserName] = useState<string>('New Player');
   const [gameUid, setGameUid] = useState<string>('#AN-000000');
   const [userEmail, setUserEmail] = useState<string>('No Email Added');
@@ -34,23 +34,35 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
   const [userDistrict, setUserDistrict] = useState<string>('Not Specified');
   const [userZip, setUserZip] = useState<string>('00000');
 
-  // Connected to Central Wallet Utility
   const [redDiamonds, setRedDiamonds] = useState<number>(1000);
   const [whiteDiamonds, setWhiteDiamonds] = useState<number>(5000);
   const [winningCash, setWinningCash] = useState<number>(0);
 
-  // Withdraw Modal & Form States
+  // Turnover & Bonus States
+  const [bonusTaken, setBonusTaken] = useState<boolean>(false);
+  const [turnoverRequired, setTurnoverRequired] = useState<number>(0);
+  const [turnoverCompleted, setTurnoverCompleted] = useState<number>(0);
+
+  // Refer & Earn States
+  const [referralCount, setReferralCount] = useState<number>(0);
+  const [referralEarnings, setReferralEarnings] = useState<number>(0);
+
+  // Deposit States
+  const [depositMethod, setDepositMethod] = useState<'eSewa' | 'Khalti' | 'CallPay' | 'ConnectIPS' | 'Bank'>('eSewa');
+  const [isFirstDeposit, setIsFirstDeposit] = useState<boolean>(true);
+  const [enableBonus, setEnableBonus] = useState<boolean>(true);
+
+  // Withdraw Modal States (0% Fee) with QR Upload Option Added
   const [showWithdrawModal, setShowWithdrawModal] = useState<boolean>(false);
   const [withdrawMethod, setWithdrawMethod] = useState<'eSewa' | 'Khalti' | 'CallPay' | 'ConnectIPS' | 'Bank'>('eSewa');
   const [withdrawAccountNo, setWithdrawAccountNo] = useState<string>('');
   const [withdrawAccountName, setWithdrawAccountName] = useState<string>('');
   const [withdrawAmount, setWithdrawAmount] = useState<string>('500');
-  const [withdrawQrFile, setWithdrawQrFile] = useState<string>(''); // 👈 QR Upload State for all methods
+  const [withdrawQrImage, setWithdrawQrImage] = useState<string | null>(null);
 
-  // Red Diamond Exchange Modal State
+  // Exchange & Profile Modals
   const [showExchangeModal, setShowExchangeModal] = useState<boolean>(false);
-
-  // Complete Profile Modal State
+  const [showCashToRedModal, setShowCashToRedModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [inputName, setInputName] = useState<string>('');
   const [inputEmail, setInputEmail] = useState<string>('');
@@ -59,23 +71,15 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
   const [inputDistrict, setInputDistrict] = useState<string>('');
   const [inputZip, setInputZip] = useState<string>('');
 
-  // Modal States for Settings
   const [showSettingModal, setShowSettingModal] = useState<boolean>(false);
   const [settingTab, setSettingTab] = useState<'support' | 'terms' | 'about'>('support');
-
-  // History State
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
 
-  // Fetch real-time data from Supabase profiles & history
   const fetchUserData = async () => {
     try {
-      // Get currently authenticated Supabase user session
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (session && session.user) {
         const authUser = session.user;
-
-        // Fetch from 'profiles' table using auth user id
         const { data: profileData } = await supabase
           .from('profiles')
           .select('*')
@@ -83,7 +87,6 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
           .single();
 
         if (profileData) {
-          // Automatic Unique UID fetched directly from database profiles table!
           if (profileData.uid) {
             setGameUid(profileData.uid);
             localStorage.setItem('arena_user_uid', profileData.uid);
@@ -98,7 +101,25 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
           if (profileData.district) setUserDistrict(profileData.district);
           if (profileData.zip_code) setUserZip(profileData.zip_code);
 
-          // Fetch withdraw history for this specific user UID
+          if (profileData.bonus_taken !== undefined) setBonusTaken(profileData.bonus_taken);
+          if (profileData.turnover_required !== undefined) setTurnoverRequired(profileData.turnover_required);
+          if (profileData.turnover_completed !== undefined) setTurnoverCompleted(profileData.turnover_completed);
+
+          // Fetch Referrals if columns exist in profiles or separate table
+          if (profileData.referral_count !== undefined) setReferralCount(profileData.referral_count);
+          if (profileData.referral_earnings !== undefined) setReferralEarnings(profileData.referral_earnings);
+
+          const { count } = await supabase
+            .from('deposit_requests')
+            .select('*', { count: 'exact', head: true })
+            .eq('user_uid', profileData.uid);
+
+          if (count && count > 0) {
+            setIsFirstDeposit(false);
+          } else {
+            setIsFirstDeposit(true);
+          }
+
           const { data: historyData } = await supabase
             .from('withdraw_requests')
             .select('*')
@@ -108,7 +129,7 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
           if (historyData) {
             const formattedHistory: HistoryItem[] = historyData.map((item: any) => ({
               type: 'Withdraw Request',
-              details: `NPR ${item.amount} via ${item.method || 'eSewa'} (${item.account_no})`,
+              details: `NPR ${item.amount} via ${item.method || 'eSewa'} (${item.account_no}) [0% Fee]`,
               date: new Date(item.created_at).toLocaleDateString(),
               status: item.status,
             }));
@@ -148,8 +169,6 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
 
     if (savedName) setUserName(savedName);
     if (savedUid) setGameUid(savedUid);
-
-    // Call Supabase user data sync
     fetchUserData();
 
     if (savedWhite) setWhiteDiamonds(Number(savedWhite));
@@ -235,13 +254,12 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     alert('Profile successfully updated!');
   };
 
-  // QR Image File Upload Handler for all withdrawal methods
-  const handleQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleWithdrawQrUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onloadend = () => {
-        setWithdrawQrFile(reader.result as string);
+        setWithdrawQrImage(reader.result as string);
       };
       reader.readAsDataURL(file);
     }
@@ -255,19 +273,24 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
       alert('Minimum withdrawal amount is NPR 500!');
       return;
     }
-
     if (amountNum > 10000) {
       alert('Maximum withdrawal limit is NPR 10,000 per transaction!');
       return;
     }
-
     if (amountNum > winningCash) {
       alert('Insufficient winning cash balance for withdrawal!');
       return;
     }
 
-    // Insert withdraw request into Supabase table
-    const { error } = await supabase.from('withdraw_requests').insert([
+    if (!withdrawQrImage) {
+      alert('⚠️ सुरक्षाको लागि कृपया आफ्नो eSewa/Khalti QR Code अपलोड गर्नुहोस् ताकि gल्ती nहोस्। (Please upload your QR code to avoid errors)');
+      return;
+    }
+
+    const feeAmount = 0; 
+    const finalPayout = amountNum;
+
+    await supabase.from('withdraw_requests').insert([
       {
         user_uid: gameUid,
         username: userName,
@@ -275,15 +298,12 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         account_no: withdrawAccountNo,
         account_name: withdrawAccountName,
         amount: amountNum,
+        fee: feeAmount,
+        payout: finalPayout,
         status: 'Processing',
       },
     ]);
 
-    if (error) {
-      console.error('Supabase error:', error);
-    }
-
-    // Automatically deduct cash from state, localStorage, and Supabase database profiles table
     const updatedCash = winningCash - amountNum;
     setWinningCash(updatedCash);
     localStorage.setItem('arena_winning_cash', updatedCash.toString());
@@ -296,11 +316,10 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         .eq('id', session.user.id);
     }
 
-    // Add to local history list
     setHistoryList((prev: HistoryItem[]) => [
       {
         type: 'Withdraw Request',
-        details: `NPR ${withdrawAmount} via ${withdrawMethod} (${withdrawAccountNo})`,
+        details: `Requested: NPR ${amountNum} (0% Fee | Payout: NPR ${finalPayout}) via ${withdrawMethod} + QR attached`,
         date: new Date().toLocaleDateString(),
         status: 'Processing',
       },
@@ -308,57 +327,97 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
     ]);
 
     setShowWithdrawModal(false);
-    alert('Withdrawal request submitted successfully! Redirecting to WhatsApp...');
+    alert(`Withdrawal request submitted successfully! (0% Platform Fee). Redirecting to WhatsApp with QR details...`);
 
-    // Open WhatsApp with complete details including payment method and QR info
     const whatsappNumber = '9779716782200';
-    const message = `New Withdraw Request!%0AUID: ${gameUid}%0AName: ${userName}%0AMethod: ${withdrawMethod}%0AAccount/Number: ${withdrawAccountNo}%0AHolder Name: ${withdrawAccountName}%0AAmount: NPR ${withdrawAmount}%0AQR Attached: ${withdrawQrFile ? 'Yes' : 'No'}`;
+    const message = `🚀 *NEW WITHDRAWAL REQUEST*%0A-----------------------------------%0A👤 *Name:* ${userName}%0A🆔 *UID:* ${gameUid}%0A💳 *Method:* ${withdrawMethod}%0A🔢 *Account No:* ${withdrawAccountNo}%0A👤 *Account Name:* ${withdrawAccountName}%0A💰 *Amount:* NPR ${amountNum}%0A📸 *(User attached QR code for scanning)*%0A-----------------------------------%0Aकृपया मेरो भुक्तानी छिटो पठाइदिनुहोला!`;
     window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
   };
 
-  const handleRedDiamondExchange = (count: number) => {
+  const handleRedDiamondExchange = async (count: number) => {
     const currentRed = getWalletBalance();
     if (currentRed < count) {
       alert(`Insufficient Red Diamonds! You need at least ${count} Red Diamonds.`);
       return;
     }
 
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      const { data: freshProfile } = await supabase
+        .from('profiles')
+        .select('bonus_taken, turnover_required, turnover_completed')
+        .eq('id', session.user.id)
+        .single();
+
+      if (freshProfile && freshProfile.bonus_taken) {
+        if (freshProfile.turnover_completed < freshProfile.turnover_required) {
+          alert(`❌ Turnover Incomplete!\nAapne bonus liya hai. Exchange karne ke liye aapko pehle ${freshProfile.turnover_required} diamonds ka game khelna hoga.\n(Abhi tak aapne khele hain: ${freshProfile.turnover_completed} diamonds)`);
+          return;
+        }
+      }
+    }
+
+    const feeAmount = count * 0.05;
+    const netCashToAdd = count - feeAmount;
+
     const newRed = updateWalletBalance(-count);
     setRedDiamonds(newRed);
 
-    const addedCash = count;
-    const newCash = winningCash + addedCash;
+    const newCash = winningCash + netCashToAdd;
     setWinningCash(newCash);
     localStorage.setItem('arena_winning_cash', newCash.toString());
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session && session.user) {
-        supabase
-          .from('profiles')
-          .update({
-            red_diamonds: newRed,
-            winning_cash: newCash,
-          })
-          .eq('id', session.user.id)
-          .then();
-      }
-    });
+    if (session && session.user) {
+      await supabase
+        .from('profiles')
+        .update({ red_diamonds: newRed, winning_cash: newCash })
+        .eq('id', session.user.id);
+    }
 
-    alert(`Successfully exchanged ${count} Red Diamonds for NPR ${addedCash} Cash!`);
+    alert(`Successfully exchanged ${count} Red Diamonds!\n5% Platform Fee: NPR ${feeAmount}\nAdded to Cash Balance: NPR ${netCashToAdd}`);
     setShowExchangeModal(false);
   };
 
+  const handleCashToRedExchange = async (amount: number) => {
+    if (winningCash < amount) {
+      alert(`Insufficient Cash Balance! You need at least NPR ${amount}.`);
+      return;
+    }
+
+    const newCash = winningCash - amount;
+    setWinningCash(newCash);
+    localStorage.setItem('arena_winning_cash', newCash.toString());
+
+    const newRed = updateWalletBalance(amount);
+    setRedDiamonds(newRed);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session && session.user) {
+      await supabase
+        .from('profiles')
+        .update({ winning_cash: newCash, red_diamonds: newRed })
+        .eq('id', session.user.id);
+    }
+
+    alert(`Successfully exchanged NPR ${amount} Cash for ${amount} Red Diamonds! 🔴`);
+    setShowCashToRedModal(false);
+  };
+
   const handleDepositTopUp = (diamonds: number, price: number) => {
-    const currentTokens = parseInt(localStorage.getItem('arena_spin_tokens') || '0', 10);
-    const updatedTokens = currentTokens + 1;
-    localStorage.setItem('arena_spin_tokens', updatedTokens.toString());
+    const bonusPercentage = isFirstDeposit ? 100 : 50;
+    const bonusDiamonds = enableBonus ? Math.floor((diamonds * bonusPercentage) / 100) : 0;
+    const totalDiamondsToCredit = diamonds + bonusDiamonds;
 
-    alert(`🎉 Deposit request placed! You earned +1 Spin Token! Total Tokens: ${updatedTokens}`);
+    const bonusStatusText = enableBonus 
+      ? `YES (${bonusPercentage}% Bonus Applied - Turnover Required)` 
+      : `NO (Clean Funds / No Bonus)`;
 
-    window.open(
-      `https://wa.me/9779716782200?text=I want to buy ${diamonds} Red Diamonds for NPR ${price} (UID: ${gameUid})`,
-      '_blank'
-    );
+    alert(`🎉 Deposit order ready via ${depositMethod}!\nTotal Diamonds: ${totalDiamondsToCredit}\nRedirecting to WhatsApp...`);
+
+    const whatsappNumber = '9779716782200';
+    const message = `🚀 *DEPOSIT REQUEST*%0A-----------------------------------%0A👤 *Name:* ${userName}%0A🆔 *UID:* ${gameUid}%0A💳 *Payment Method:* ${depositMethod}%0A💎 *Package:* ${diamonds} Red Diamonds%0A💰 *Price:* NPR ${price}%0A🎁 *Bonus Wanted:* ${bonusStatusText}%0A🎁 *Bonus Diamonds:* ${bonusDiamonds} Red Diamonds%0A💎 *Total Expected Diamonds:* ${totalDiamondsToCredit} Red Diamonds%0A-----------------------------------%0APlease send your payment QR scanner!`;
+
+    window.open(`https://wa.me/${whatsappNumber}?text=${message}`, '_blank');
   };
 
   const redPackages = [
@@ -380,25 +439,24 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
 
   return (
     <div className="w-full max-w-md mx-auto text-white flex flex-col items-center pb-20 px-2 select-none relative">
-      {/* Top Bar */}
-      <div className="w-full flex items-center justify-between mb-4">
-        <h1 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
+      <div className="w-full flex items-center justify-between mb-3">
+        <h1 className="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
           WALLET & PROFILE
         </h1>
         <button
           onClick={() => setShowSettingModal(true)}
-          className="p-2.5 rounded-xl border bg-gray-900 border-gray-800 text-cyan-400 shadow-md hover:scale-105 transition-all font-bold text-xs flex items-center gap-1 cursor-pointer"
+          className="p-2 rounded-xl border bg-gray-900 border-gray-800 text-cyan-400 shadow-md hover:scale-105 transition-all font-bold text-xs flex items-center gap-1 cursor-pointer"
         >
           ⚙️ Settings
         </button>
       </div>
 
-      {/* Profile Card with Unique UID Display */}
-      <div className="w-full bg-gray-900 border border-purple-500/30 rounded-2xl p-4 mb-4 flex flex-col gap-3 shadow-lg">
+      {/* COMPACT PROFILE BOX */}
+      <div className="w-full bg-gray-900 border border-purple-500/30 rounded-2xl p-3 mb-3 flex flex-col gap-2 shadow-lg">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-bold">{userName}</h2>
-            <div className="flex items-center gap-2 mt-1">
+            <h2 className="text-xs font-bold">{userName}</h2>
+            <div className="flex items-center gap-2 mt-0.5">
               <p className="text-[10px] text-cyan-400 font-bold">UID: {gameUid}</p>
               <button
                 onClick={handleCopyUid}
@@ -410,117 +468,220 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
           </div>
           <button
             onClick={handleOpenProfileModal}
-            className="px-3 py-1.5 bg-gradient-to-r from-pink-500 to-purple-600 text-white text-xs rounded-xl font-bold shadow hover:opacity-90 transition-all active:scale-95 cursor-pointer"
+            className="px-2.5 py-1 bg-gradient-to-r from-pink-500 to-purple-600 text-white text-[10px] rounded-lg font-bold shadow hover:opacity-95 transition-all cursor-pointer"
           >
-            ✏️ Complete Profile
+            ✏️ Edit Profile
           </button>
         </div>
 
-        {/* User Info Grid */}
-        <div className="bg-black/40 border border-gray-800 p-2.5 rounded-xl grid grid-cols-2 gap-2 text-[10px]">
+        {bonusTaken && turnoverRequired > 0 && (
+          <div className="bg-red-950/40 border border-red-500/40 p-2 rounded-xl text-[10px]">
+            <p className="text-red-300 font-bold mb-1">⚠️ Active Turnover Target:</p>
+            <p className="text-gray-300">
+              Completed: <span className="text-green-400 font-bold">{turnoverCompleted}</span> / {turnoverRequired} Diamonds
+            </p>
+            <div className="w-full bg-black/60 h-2 rounded-full mt-1 overflow-hidden border border-gray-800">
+              <div 
+                className="bg-gradient-to-r from-red-500 to-green-500 h-full transition-all duration-300" 
+                style={{ width: `${Math.min(100, (turnoverCompleted / turnoverRequired) * 100)}%` }}
+              ></div>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-black/40 border border-gray-800 p-2 rounded-xl grid grid-cols-2 gap-1 text-[9px]">
           <div>
-            <span className="text-gray-500 block">Email:</span>
-            <span className="text-gray-200 font-semibold truncate block">{userEmail}</span>
+            <span className="text-gray-500">Email:</span> <span className="text-gray-200">{userEmail}</span>
           </div>
           <div>
-            <span className="text-gray-500 block">Mobile:</span>
-            <span className="text-green-400 font-semibold">{userMobile}</span>
-          </div>
-          <div>
-            <span className="text-gray-500 block">City / District:</span>
-            <span className="text-cyan-300 font-semibold">{userCity}, {userDistrict}</span>
-          </div>
-          <div>
-            <span className="text-gray-500 block">ZIP Code:</span>
-            <span className="text-yellow-400 font-semibold">{userZip}</span>
+            <span className="text-gray-500">Mobile:</span> <span className="text-green-400">{userMobile}</span>
           </div>
         </div>
       </div>
 
-      {/* 3 Balance Boxes */}
-      <div className="w-full grid grid-cols-3 gap-2 mb-4">
-        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center shadow">
+      {/* GLOWING FIRST DEPOSIT BANNER WITH CLAIM BUTTON REDIRECTING TO DEPOSIT */}
+      <div className="w-full mb-3 p-[2px] rounded-2xl bg-gradient-to-r from-pink-500 via-purple-500 to-cyan-400 animate-pulse shadow-lg">
+        <div className="bg-gray-950 rounded-[14px] p-3 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">🎁</span>
+            <div>
+              <h3 className="text-xs font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-yellow-300">
+                FIRST DEPOSIT OFFER!
+              </h3>
+              <p className="text-[10px] text-gray-300 font-medium">
+                Deposit now & get <span className="text-green-400 font-bold">100% Bonus Pack</span> instantly!
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => setActiveTab('deposit')}
+            className="px-3 py-1.5 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-black text-[10px] rounded-xl shadow cursor-pointer hover:scale-105 transition-all"
+          >
+            Claim Now
+          </button>
+        </div>
+      </div>
+
+      <div className="w-full grid grid-cols-3 gap-2 mb-3">
+        <div className="bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-center shadow">
           <p className="text-[9px] text-gray-400 font-bold">CASH</p>
           <p className="text-xs font-black text-green-400 mt-1">NPR {winningCash}</p>
         </div>
-        <div className="bg-gray-900 border border-gray-800 p-3 rounded-xl text-center shadow">
+        <div className="bg-gray-900 border border-gray-800 p-2.5 rounded-xl text-center shadow">
           <p className="text-[9px] text-gray-400 font-bold">WHITE DIAMOND</p>
           <p className="text-xs font-black text-cyan-400 mt-1">{whiteDiamonds} 💎</p>
         </div>
-        <div className="bg-gray-900 border border-red-500/60 bg-red-950/30 p-3 rounded-xl text-center shadow">
+        <div className="bg-gray-900 border border-red-500/60 bg-red-950/30 p-2.5 rounded-xl text-center shadow">
           <p className="text-[9px] text-red-300 font-bold">RED DIAMOND</p>
           <p className="text-xs font-black text-red-400 mt-1">{redDiamonds} 🔴</p>
         </div>
       </div>
 
-      {/* Action Cards */}
-      <div className="w-full grid grid-cols-2 gap-2 mb-4">
+      <div className="w-full grid grid-cols-3 gap-2 mb-4">
         <div 
           onClick={() => setShowWithdrawModal(true)}
-          className="bg-gradient-to-br from-green-950/80 to-gray-900 border border-green-500/40 p-3.5 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-green-400 active:scale-95 transition-all shadow-lg"
+          className="bg-gradient-to-br from-green-950/80 to-gray-900 border border-green-500/40 p-3 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-green-400 transition-all shadow-lg"
         >
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-xl">💸</span>
-            <span className="text-[9px] bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full font-bold">Min 500 NPR</span>
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-lg">💸</span>
+            <span className="text-[8px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded-full font-bold">0% Fee</span>
           </div>
           <div>
-            <h3 className="text-xs font-black text-green-300 uppercase">Withdraw Cash</h3>
-            <p className="text-[10px] text-gray-400 mt-0.5">eSewa, Khalti, Bank & more</p>
+            <h3 className="text-[11px] font-black text-green-300 uppercase">Withdraw</h3>
+            <p className="text-[9px] text-gray-400">Instant payout</p>
+          </div>
+        </div>
+
+        <div 
+          onClick={() => setShowCashToRedModal(true)}
+          className="bg-gradient-to-br from-cyan-950/80 to-gray-900 border border-cyan-500/40 p-3 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 transition-all shadow-lg"
+        >
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-lg">💎</span>
+            <span className="text-[8px] bg-cyan-500/20 text-cyan-400 px-1.5 py-0.5 rounded-full font-bold">1:1 Pack</span>
+          </div>
+          <div>
+            <h3 className="text-[11px] font-black text-cyan-300 uppercase">Cash ➔ Red</h3>
+            <p className="text-[9px] text-gray-400">Buy Red Dias</p>
           </div>
         </div>
 
         <div 
           onClick={() => setShowExchangeModal(true)}
-          className="bg-gradient-to-br from-red-950/80 to-gray-900 border border-red-500/40 p-3.5 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-red-400 active:scale-95 transition-all shadow-lg"
+          className="bg-gradient-to-br from-red-950/80 to-gray-900 border border-red-500/40 p-3 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-red-400 transition-all shadow-lg"
         >
-          <div className="flex justify-between items-center mb-2">
-            <span className="text-xl">🔄</span>
-            <span className="text-[9px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full font-bold">1:1 Value</span>
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-lg">🔄</span>
+            <span className="text-[8px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded-full font-bold">5% Comm.</span>
           </div>
           <div>
-            <h3 className="text-xs font-black text-red-300 uppercase">Red Diamond Exchange</h3>
-            <p className="text-[10px] text-gray-400 mt-0.5">Convert to Cash balance</p>
+            <h3 className="text-[11px] font-black text-red-300 uppercase">Red ➔ Cash</h3>
+            <p className="text-[9px] text-gray-400">Convert to Cash</p>
           </div>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="w-full grid grid-cols-4 gap-1 bg-gray-900 p-1 rounded-xl mb-4">
-        {(['cash', 'white', 'red', 'history'] as const).map((tab) => (
+      {/* TABS NAVIGATION (Expanded to 6 columns for clean layout) */}
+      <div className="w-full grid grid-cols-6 gap-1 bg-gray-900 p-1 rounded-xl mb-4">
+        {(['deposit', 'cash', 'white', 'red', 'history', 'refer'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`py-2 text-[10px] font-bold uppercase rounded-lg transition-all cursor-pointer ${
+            className={`py-2 text-[8px] sm:text-[9px] font-bold uppercase rounded-lg transition-all cursor-pointer ${
               activeTab === tab
                 ? 'bg-red-500 text-black shadow font-black'
                 : 'text-gray-400 hover:text-white'
             }`}
           >
-            {tab}
+            {tab === 'refer' ? '🤝 Refer' : tab}
           </button>
         ))}
       </div>
 
-      {/* CASH TAB */}
+      {activeTab === 'deposit' && (
+        <div className="w-full flex flex-col gap-3">
+          <div className="bg-gray-900 border border-purple-500/40 p-4 rounded-2xl shadow-lg">
+            <h3 className="text-xs font-black text-pink-400 mb-2 uppercase">1. Choose Payment Method</h3>
+            <div className="grid grid-cols-5 gap-1 mb-3">
+              {(['eSewa', 'Khalti', 'CallPay', 'ConnectIPS', 'Bank'] as const).map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setDepositMethod(method)}
+                  className={`py-2 text-[9px] font-bold rounded-xl border transition-all cursor-pointer ${
+                    depositMethod === method
+                      ? 'bg-cyan-500 text-black border-cyan-400 shadow font-black'
+                      : 'bg-black/50 text-gray-300 border-gray-800'
+                  }`}
+                >
+                  {method}
+                </button>
+              ))}
+            </div>
+
+            <div className="bg-black/60 border border-yellow-500/40 p-3 rounded-xl flex items-start gap-2 cursor-pointer" onClick={() => setEnableBonus(!enableBonus)}>
+              <input
+                type="checkbox"
+                checked={enableBonus}
+                onChange={(e) => setEnableBonus(e.target.checked)}
+                className="mt-0.5 accent-pink-500 cursor-pointer"
+              />
+              <div className="text-[10px]">
+                <p className="font-bold text-yellow-300">
+                  {isFirstDeposit ? 'Get 100% First Deposit Bonus (Requires Turnover)' : 'Get 50% Deposit Bonus (Requires Turnover)'}
+                </p>
+                <p className="text-gray-400 text-[9px]">Uncheck if you want clean funds without turnover restrictions.</p>
+              </div>
+            </div>
+          </div>
+
+          <h3 className="text-xs font-bold text-pink-400 mt-1">
+            2. Select Red Diamond Package (Via {depositMethod})
+          </h3>
+          {redPackages.map((pkg, idx) => {
+            const bonusPercent = isFirstDeposit ? 100 : 50;
+            const extraBonus = Math.floor((pkg.diamonds * bonusPercent) / 100);
+            return (
+              <div
+                key={idx}
+                className="flex items-center justify-between bg-gray-900 border border-gray-800 p-3 rounded-xl shadow"
+              >
+                <div>
+                  <p className="text-xs font-bold text-white">
+                    🔴 {pkg.diamonds} Red Diamonds {enableBonus && <span className="text-pink-400 text-[10px]">(+ {extraBonus} Bonus)</span>}
+                  </p>
+                  <p className="text-[10px] text-yellow-400">NPR {pkg.price} <span className="text-gray-500 text-[9px] ml-1">(Spin token added on approval)</span></p>
+                </div>
+                <button
+                  onClick={() => handleDepositTopUp(pkg.diamonds, pkg.price)}
+                  className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-[10px] rounded-lg shadow cursor-pointer"
+                >
+                  Deposit via WhatsApp
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {activeTab === 'cash' && (
         <div className="w-full flex flex-col gap-4">
           <div className="bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center shadow-lg">
             <h3 className="text-xs font-bold text-gray-400">WINNING CASH BALANCE</h3>
             <p className="text-3xl font-black text-green-400 my-2">NPR {winningCash}</p>
             <p className="text-[11px] text-gray-400 mb-4">
-              Secure withdrawals range from **NPR 500 up to NPR 10,000** via eSewa, Khalti, CallPay, ConnectIPS, or Bank Account.
+              Withdrawals range from **NPR 500 up to NPR 10,000** via eSewa, Khalti, CallPay, ConnectIPS, or Bank Account. <span className="text-green-400 font-bold">0% fee (Free withdrawal!).</span>
             </p>
             <button
               onClick={() => setShowWithdrawModal(true)}
               className="w-full py-3 bg-green-600 hover:bg-green-500 font-black text-xs rounded-xl text-white shadow-lg transition-all cursor-pointer"
             >
-              💸 OPEN WITHDRAWAL PANEL
+              💸 OPEN FREE WITHDRAWAL PANEL (0% FEE)
             </button>
           </div>
         </div>
       )}
 
-      {/* WHITE DIAMONDS TAB */}
       {activeTab === 'white' && (
         <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl text-center shadow-lg">
           <h3 className="text-xs font-bold text-gray-400">WHITE DIAMOND BALANCE</h3>
@@ -542,14 +703,13 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
                 alert('Insufficient White Diamonds! You need at least 2,00,000 White Diamonds.');
               }
             }}
-            className="w-full py-2.5 bg-gradient-to-r from-cyan-400 to-blue-600 text-black font-black text-xs rounded-xl shadow hover:opacity-90 transition-all cursor-pointer"
+            className="w-full py-2.5 bg-gradient-to-r from-cyan-400 to-blue-600 text-black font-black text-xs rounded-xl shadow transition-all cursor-pointer"
           >
             EXCHANGE 2L WHITE ➔ 100 RED DIAS
           </button>
         </div>
       )}
 
-      {/* RED DIAMONDS TAB */}
       {activeTab === 'red' && (
         <div className="w-full flex flex-col gap-3">
           <div className="flex justify-between items-center bg-gray-900 border border-red-500/50 p-3 rounded-xl shadow-lg">
@@ -561,34 +721,12 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
               onClick={() => setShowExchangeModal(true)}
               className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer"
             >
-              Exchange to Cash
+              Exchange to Cash (5% Fee)
             </button>
           </div>
-
-          <h3 className="text-xs font-bold text-pink-400 mt-2">
-            BUY RED DIAMONDS (GET +1 SPIN TOKEN PER DEPOSIT)
-          </h3>
-          {redPackages.map((pkg, idx) => (
-            <div
-              key={idx}
-              className="flex items-center justify-between bg-gray-900 border border-gray-800 p-3 rounded-xl shadow"
-            >
-              <div>
-                <p className="text-xs font-bold text-white">🔴 {pkg.diamonds} Red Diamonds</p>
-                <p className="text-[10px] text-yellow-400">NPR {pkg.price} <span className="text-green-400 font-bold ml-1">(+1 Spin Token)</span></p>
-              </div>
-              <button
-                onClick={() => handleDepositTopUp(pkg.diamonds, pkg.price)}
-                className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white font-bold text-[10px] rounded-lg shadow cursor-pointer"
-              >
-                Buy via WhatsApp
-              </button>
-            </div>
-          ))}
         </div>
       )}
 
-      {/* HISTORY TAB */}
       {activeTab === 'history' && (
         <div className="w-full bg-gray-900/80 border border-gray-800 p-4 rounded-2xl shadow-lg">
           <h3 className="text-xs font-bold text-gray-400 mb-3">TRANSACTION HISTORY</h3>
@@ -597,24 +735,18 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
           ) : (
             <div className="flex flex-col gap-2">
               {historyList.map((item, index) => (
-                <div
-                  key={index}
-                  className="bg-black/40 border border-gray-800 p-3 rounded-xl text-xs flex justify-between items-center"
-                >
-                  <div>
-                    <p className="font-bold text-cyan-400">{item.type}</p>
-                    <p className="text-[10px] text-gray-300">{item.details}</p>
-                    <p className="text-[9px] text-gray-500">{item.date}</p>
+                <div key={index} className="bg-black/40 border border-gray-800 p-3 rounded-xl text-[10px]">
+                  <div className="flex justify-between font-bold mb-1">
+                    <span className="text-cyan-400">{item.type}</span>
+                    <span className={`px-1.5 py-0.5 rounded ${
+                      item.status === 'Approved' ? 'bg-green-500/20 text-green-400' : 
+                      item.status === 'Rejected' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'
+                    }`}>
+                      {item.status}
+                    </span>
                   </div>
-                  <span
-                    className={`text-[10px] px-2 py-1 rounded font-bold border ${
-                      item.status === 'Success'
-                        ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                        : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-                    }`}
-                  >
-                    {item.status}
-                  </span>
+                  <p className="text-gray-200">{item.details}</p>
+                  <p className="text-[9px] text-gray-500 mt-1">{item.date}</p>
                 </div>
               ))}
             </div>
@@ -622,318 +754,301 @@ export default function WalletSection({ wallet, setWallet }: WalletSectionProps)
         </div>
       )}
 
-      {/* COMPLETE PROFILE MODAL */}
-      {showProfileModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
-              <h3 className="text-sm font-black text-pink-400">📝 COMPLETE PROFILE</h3>
+      {/* 👇 PERFECT REFER & EARN 10% COMMISSION TAB */}
+      {activeTab === 'refer' && (
+        <div className="w-full bg-gradient-to-br from-purple-950 via-gray-900 to-indigo-950 border-2 border-pink-500/60 p-4 rounded-2xl shadow-2xl flex flex-col gap-4 animate-fadeIn">
+          
+          <div className="text-center">
+            <span className="text-3xl">🤝</span>
+            <h3 className="text-xs font-black text-white mt-1 uppercase tracking-wider">Refer Friends & Earn 10% Commission</h3>
+            <p className="text-[10px] text-gray-300 mt-0.5">
+              Share your invite link. When your friends make a deposit, <span className="text-yellow-400 font-bold">10% commission</span> is automatically added to your cash balance!
+            </p>
+          </div>
+
+          {/* Stats Grid */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-black/50 border border-pink-500/30 p-2.5 rounded-xl text-center">
+              <p className="text-[9px] text-gray-400 uppercase font-bold">Total Referred</p>
+              <p className="text-sm font-black text-cyan-400 mt-0.5">{referralCount} Players</p>
+            </div>
+            <div className="bg-black/50 border border-pink-500/30 p-2.5 rounded-xl text-center">
+              <p className="text-[9px] text-gray-400 uppercase font-bold">Commission Earned</p>
+              <p className="text-sm font-black text-yellow-400 mt-0.5">NPR {referralEarnings}</p>
+            </div>
+          </div>
+
+          {/* Referral Link Box */}
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] font-bold text-gray-300">Your Unique Referral Link:</label>
+            <div className="flex items-center gap-2 bg-black/70 p-2 rounded-xl border border-gray-700">
+              <input
+                type="text"
+                readOnly
+                value={`https://arenanepal.com/signup?ref=${gameUid}`}
+                className="bg-transparent text-[10px] text-yellow-300 flex-1 outline-none px-1 truncate font-mono"
+              />
               <button
-                onClick={() => setShowProfileModal(false)}
-                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
+                onClick={() => {
+                  navigator.clipboard.writeText(`https://arenanepal.com/signup?ref=${gameUid}`);
+                  alert('Referral link copied to clipboard!');
+                }}
+                className="bg-yellow-500 hover:bg-yellow-400 text-black font-black text-[10px] px-3 py-1.5 rounded-lg transition cursor-pointer shadow"
               >
-                ✕
+                Copy Link
               </button>
             </div>
-
-            <form onSubmit={handleSaveProfile} className="flex flex-col gap-3 text-xs">
-              <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Full Name</label>
-                <input
-                  type="text"
-                  placeholder="Enter your name"
-                  value={inputName}
-                  onChange={(e) => setInputName(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Email Address</label>
-                <input
-                  type="email"
-                  placeholder="Enter your email"
-                  value={inputEmail}
-                  onChange={(e) => setInputEmail(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Mobile Number</label>
-                <input
-                  type="text"
-                  placeholder="Enter mobile number"
-                  value={inputMobile}
-                  onChange={(e) => setInputMobile(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[10px] text-gray-400 font-semibold mb-1 block">City (Shahar)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Kathmandu"
-                    value={inputCity}
-                    onChange={(e) => setInputCity(e.target.value)}
-                    className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] text-gray-400 font-semibold mb-1 block">District (Jila)</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Kathmandu"
-                    value={inputDistrict}
-                    onChange={(e) => setInputDistrict(e.target.value)}
-                    className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">ZIP / Postal Code</label>
-                <input
-                  type="text"
-                  placeholder="e.g. 44600"
-                  value={inputZip}
-                  onChange={(e) => setInputZip(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="mt-3 py-3 bg-gradient-to-r from-cyan-500 to-blue-600 hover:opacity-90 font-black text-xs rounded-xl text-black shadow-lg transition-all cursor-pointer"
-              >
-                Save Profile Details
-              </button>
-            </form>
           </div>
+
+          <div className="bg-black/40 border border-yellow-500/20 p-2.5 rounded-xl text-[9px] text-gray-300 space-y-1">
+            <p className="font-bold text-yellow-400">💡 How it works:</p>
+            <p>1. Copy your unique link and share with your friends on WhatsApp or Messenger.</p>
+            <p>2. When they join using your UID link and complete a deposit.</p>
+            <p>3. You instantly get a 10% commission credited directly to your winning cash balance!</p>
+          </div>
+
         </div>
       )}
 
-      {/* WITHDRAW MODAL WITH AUTOMATIC UID, QR UPLOAD FOR ALL METHODS, AND DEDUCTION LOGIC */}
+      {/* WITHDRAW MODAL */}
       {showWithdrawModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
-              <h3 className="text-sm font-black text-green-400">💸 WITHDRAW WINNING CASH</h3>
-              <button
-                onClick={() => setShowWithdrawModal(false)}
-                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
-              >
-                ✕
-              </button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-green-500/50 w-full max-w-sm rounded-2xl p-4 shadow-2xl relative">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-black text-green-400 uppercase">💸 Free Withdrawal (0% Fee)</h3>
+              <button onClick={() => setShowWithdrawModal(false)} className="text-gray-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
-
-            {/* Payment Options Selection Bar */}
-            <div className="grid grid-cols-5 gap-1 mb-4">
-              {(['eSewa', 'Khalti', 'CallPay', 'ConnectIPS', 'Bank'] as const).map((method) => (
-                <button
-                  key={method}
-                  type="button"
-                  onClick={() => setWithdrawMethod(method)}
-                  className={`py-2 text-[10px] font-bold rounded-xl border transition-all cursor-pointer ${
-                    withdrawMethod === method
-                      ? 'bg-green-500 text-black border-green-400 shadow'
-                      : 'bg-black/50 text-gray-300 border-gray-800 hover:border-gray-700'
-                  }`}
-                >
-                  {method}
-                </button>
-              ))}
-            </div>
-
             <form onSubmit={handleWithdrawSubmit} className="flex flex-col gap-3 text-xs">
               <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Game UID (Automatic)</label>
-                <input
-                  type="text"
-                  value={gameUid}
-                  readOnly
-                  className="w-full bg-black/80 border border-gray-800 text-cyan-400 font-bold p-2.5 rounded-xl cursor-not-allowed select-all"
-                  title="Your unique UID is automatically fetched from your profile."
+                <label className="text-[10px] text-gray-400 font-bold">Method</label>
+                <select 
+                  value={withdrawMethod} 
+                  onChange={(e) => setWithdrawMethod(e.target.value as any)}
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-1 text-xs outline-none"
+                >
+                  <option value="eSewa">eSewa</option>
+                  <option value="Khalti">Khalti</option>
+                  <option value="CallPay">CallPay</option>
+                  <option value="ConnectIPS">ConnectIPS</option>
+                  <option value="Bank">Bank Account</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-400 font-bold">Account Number / Mobile</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="e.g. 98XXXXXXXX" 
+                  value={withdrawAccountNo}
+                  onChange={(e) => setWithdrawAccountNo(e.target.value)}
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-1 text-xs outline-none"
                 />
               </div>
-
               <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">Withdraw Amount (NPR 500 - 10,000)</label>
-                <input
-                  type="number"
+                <label className="text-[10px] text-gray-400 font-bold">Account Holder Name</label>
+                <input 
+                  type="text" 
+                  required
+                  placeholder="Full Name" 
+                  value={withdrawAccountName}
+                  onChange={(e) => setWithdrawAccountName(e.target.value)}
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-1 text-xs outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-400 font-bold">Amount (NPR 500 - 10,000)</label>
+                <input 
+                  type="number" 
+                  required
                   min="500"
                   max="10000"
                   value={withdrawAmount}
                   onChange={(e) => setWithdrawAmount(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-1 text-xs outline-none"
                 />
               </div>
-
               <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">
-                  {withdrawMethod === 'Bank' ? 'Bank Account Number' : `${withdrawMethod} Mobile Number`}
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter Account/Number"
-                  value={withdrawAccountNo}
-                  onChange={(e) => setWithdrawAccountNo(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">
-                  {withdrawMethod === 'Bank' ? 'Bank Name & Branch' : 'Account Holder Full Name'}
-                </label>
-                <input
-                  type="text"
-                  placeholder="Enter Name"
-                  value={withdrawAccountName}
-                  onChange={(e) => setWithdrawAccountName(e.target.value)}
-                  className="w-full bg-black border border-gray-800 text-white p-2.5 rounded-xl"
-                  required
-                />
-              </div>
-
-              {/* QR Upload Option for ALL payment methods */}
-              <div>
-                <label className="text-[10px] text-gray-400 font-semibold mb-1 block">
-                  Upload {withdrawMethod} QR Code (Optional/Recommended Image)
-                </label>
-                <input
-                  type="file"
+                <label className="text-[10px] text-yellow-400 font-bold">📸 Upload Your QR Code (Required for Verification)</label>
+                <input 
+                  type="file" 
                   accept="image/*"
-                  onChange={handleQrUpload}
-                  className="w-full bg-black border border-gray-800 text-gray-300 text-[10px] p-2 rounded-xl file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-[10px] file:font-semibold file:bg-green-500 file:text-black hover:file:bg-green-400 cursor-pointer"
+                  onChange={handleWithdrawQrUpload}
+                  className="w-full text-[10px] text-gray-400 mt-1 file:mr-2 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-[10px] file:font-bold file:bg-green-600 file:text-white hover:file:bg-green-500 cursor-pointer"
                 />
-                {withdrawQrFile && (
-                  <p className="text-[9px] text-green-400 mt-1">✓ QR Code attached successfully</p>
-                )}
               </div>
-
-              <button
+              <button 
                 type="submit"
-                className="mt-3 py-3 bg-gradient-to-r from-green-500 to-emerald-600 hover:opacity-90 font-black text-xs rounded-xl text-black shadow-lg transition-all cursor-pointer"
+                className="w-full py-2.5 bg-green-600 hover:bg-green-500 text-white font-black text-xs rounded-xl shadow transition mt-2 cursor-pointer"
               >
-                Submit Withdraw to WhatsApp
+                Submit Withdrawal Request
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* RED DIAMOND EXCHANGE MODAL */}
+      {/* RED TO CASH EXCHANGE MODAL */}
       {showExchangeModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-gray-900 border border-red-500/40 text-white rounded-2xl p-5 shadow-2xl flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
-              <h3 className="text-sm font-black text-red-400">🔄 RED DIAMOND EXCHANGE</h3>
-              <button
-                onClick={() => setShowExchangeModal(false)}
-                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
-              >
-                ✕
-              </button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-red-500/50 w-full max-w-sm rounded-2xl p-4 shadow-2xl relative">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-black text-red-400 uppercase">🔄 Red Diamonds ➔ Cash</h3>
+              <button onClick={() => setShowExchangeModal(false)} className="text-gray-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
-            <p className="text-xs text-gray-300 mb-4">
-              Convert your Red Diamonds into instant Winning Cash (1 Red Diamond = 1 NPR Cash).
+            <p className="text-[11px] text-gray-300 mb-4">
+              Convert Red Diamonds into Winning Cash. Platform fee is <span className="text-red-400 font-bold">5%</span>.
             </p>
-            <div className="flex flex-col gap-2">
-              {[100, 500, 1000, 2000, 5000].map((count) => (
+            <div className="grid grid-cols-2 gap-2">
+              {[100, 500, 1000, 5000].map((cnt) => (
                 <button
-                  key={count}
-                  onClick={() => handleRedDiamondExchange(count)}
-                  className="py-2.5 px-3 bg-red-950/60 border border-red-500/40 hover:bg-red-600 hover:text-black font-bold text-xs rounded-xl flex justify-between items-center transition-all cursor-pointer"
+                  key={cnt}
+                  onClick={() => handleRedDiamondExchange(cnt)}
+                  className="py-3 bg-black/60 hover:bg-red-950/50 border border-red-500/30 rounded-xl text-xs font-bold text-red-300 transition cursor-pointer shadow"
                 >
-                  <span>🔴 {count} Red Diamonds</span>
-                  <span className="text-green-400 font-black">➔ NPR {count} Cash</span>
+                  Exchange {cnt} 🔴
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* CASH TO RED EXCHANGE MODAL */}
+      {showCashToRedModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-cyan-500/50 w-full max-w-sm rounded-2xl p-4 shadow-2xl relative">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-black text-cyan-400 uppercase">💎 Cash ➔ Red Diamonds (1:1)</h3>
+              <button onClick={() => setShowCashToRedModal(false)} className="text-gray-400 hover:text-white font-bold cursor-pointer">✕</button>
+            </div>
+            <p className="text-[11px] text-gray-300 mb-4">
+              Use your winning cash balance to instantly buy Red Diamonds without any fees!
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {[100, 500, 1000, 5000].map((amt) => (
+                <button
+                  key={amt}
+                  onClick={() => handleCashToRedExchange(amt)}
+                  className="py-3 bg-black/60 hover:bg-cyan-950/50 border border-cyan-500/30 rounded-xl text-xs font-bold text-cyan-300 transition cursor-pointer shadow"
+                >
+                  NPR {amt} Cash ➔ Red
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PROFILE EDIT MODAL */}
+      {showProfileModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-purple-500/50 w-full max-w-sm rounded-2xl p-4 shadow-2xl relative">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-black text-pink-400 uppercase">✏️ Edit Player Profile</h3>
+              <button onClick={() => setShowProfileModal(false)} className="text-gray-400 hover:text-white font-bold cursor-pointer">✕</button>
+            </div>
+            <form onSubmit={handleSaveProfile} className="flex flex-col gap-2.5 text-xs">
+              <div>
+                <label className="text-[10px] text-gray-400 font-bold">Username</label>
+                <input 
+                  type="text" 
+                  required
+                  value={inputName} 
+                  onChange={(e) => setInputName(e.target.value)} 
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-0.5 text-xs outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-400 font-bold">Email</label>
+                <input 
+                  type="email" 
+                  value={inputEmail} 
+                  onChange={(e) => setInputEmail(e.target.value)} 
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-0.5 text-xs outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-gray-400 font-bold">Mobile Number</label>
+                <input 
+                  type="text" 
+                  value={inputMobile} 
+                  onChange={(e) => setInputMobile(e.target.value)} 
+                  className="w-full bg-black/60 border border-gray-800 p-2 rounded-xl text-white mt-0.5 text-xs outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                <div>
+                  <label className="text-[9px] text-gray-400 font-bold">City</label>
+                  <input type="text" value={inputCity} onChange={(e) => setInputCity(e.target.value)} className="w-full bg-black/60 border border-gray-800 p-1.5 rounded-xl text-white mt-0.5 text-[10px] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[9px] text-gray-400 font-bold">District</label>
+                  <input type="text" value={inputDistrict} onChange={(e) => setInputDistrict(e.target.value)} className="w-full bg-black/60 border border-gray-800 p-1.5 rounded-xl text-white mt-0.5 text-[10px] outline-none" />
+                </div>
+                <div>
+                  <label className="text-[9px] text-gray-400 font-bold">Zip Code</label>
+                  <input type="text" value={inputZip} onChange={(e) => setInputZip(e.target.value)} className="w-full bg-black/60 border border-gray-800 p-1.5 rounded-xl text-white mt-0.5 text-[10px] outline-none" />
+                </div>
+              </div>
+              <button 
+                type="submit"
+                className="w-full py-2.5 bg-gradient-to-r from-pink-500 to-purple-600 text-white font-black text-xs rounded-xl shadow transition mt-2 cursor-pointer"
+              >
+                Save Changes
+              </button>
+            </form>
           </div>
         </div>
       )}
 
       {/* SETTINGS MODAL */}
       {showSettingModal && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-gray-900 border border-gray-800 text-white rounded-2xl p-5 shadow-2xl flex flex-col max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-800 mb-3">
-              <h3 className="text-sm font-black text-cyan-400">⚙️ ARENA NEPAL SETTINGS</h3>
-              <button
-                onClick={() => setShowSettingModal(false)}
-                className="text-gray-400 hover:text-white font-bold text-base px-2 cursor-pointer"
-              >
-                ✕
-              </button>
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-gray-900 border border-cyan-500/50 w-full max-w-sm rounded-2xl p-4 shadow-2xl relative">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-black text-cyan-400 uppercase">⚙️ Settings & Support</h3>
+              <button onClick={() => setShowSettingModal(false)} className="text-gray-400 hover:text-white font-bold cursor-pointer">✕</button>
             </div>
-
-            <div className="grid grid-cols-3 gap-1 bg-black p-1 rounded-xl mb-4 text-[10px] font-bold">
-              {(['support', 'terms', 'about'] as const).map((tab) => (
+            <div className="grid grid-cols-3 gap-1 mb-3 bg-black/50 p-1 rounded-xl">
+              {(['support', 'terms', 'about'] as const).map((t) => (
                 <button
-                  key={tab}
-                  onClick={() => setSettingTab(tab)}
-                  className={`py-2 rounded-lg uppercase transition-all cursor-pointer ${
-                    settingTab === tab ? 'bg-cyan-500 text-black shadow' : 'text-gray-400 hover:text-white'
+                  key={t}
+                  onClick={() => setSettingTab(t)}
+                  className={`py-1.5 text-[9px] font-bold uppercase rounded-lg transition ${
+                    settingTab === t ? 'bg-cyan-500 text-black font-black' : 'text-gray-400 hover:text-white'
                   }`}
                 >
-                  {tab}
+                  {t}
                 </button>
               ))}
             </div>
-
-            <div className="text-xs text-gray-300 flex flex-col gap-3">
+            <div className="bg-black/40 border border-gray-800 p-3 rounded-xl text-[11px] text-gray-300 min-h-[120px]">
               {settingTab === 'support' && (
-                <div>
-                  <h4 className="font-bold text-cyan-400 mb-1">Customer Support</h4>
-                  <p className="text-[11px] text-gray-400 mb-3">
-                    Need help with tournaments, deposits, or withdrawals? Reach out to our official support team directly via WhatsApp.
-                  </p>
-                  <a
-                    href="https://wa.me/9779716782200?text=Hello%20Arena%20Nepal%20Support"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="block text-center py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl shadow"
-                  >
-                    💬 Chat on WhatsApp
-                  </a>
+                <div className="space-y-2">
+                  <p className="font-bold text-cyan-300">Need Help? Contact Admin:</p>
+                  <p>💬 WhatsApp Support: <span className="text-green-400 font-bold">+977 9716782200</span></p>
+                  <p className="text-[10px] text-gray-400">Available 24/7 for deposit & withdrawal approvals.</p>
                 </div>
               )}
-
               {settingTab === 'terms' && (
-                <div>
-                  <h4 className="font-bold text-cyan-400 mb-1">Terms & Conditions</h4>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    1. All players must provide accurate mobile and UID details.<br />
-                    2. Minimum withdrawal is NPR 500 and maximum is NPR 10,000 per request.<br />
-                    3. Fraudulent activities or fake QR code submissions will result in immediate account termination and forfeiture of wallet balance.
-                  </p>
+                <div className="space-y-1 text-[10px]">
+                  <p className="font-bold text-yellow-300">Terms & Conditions:</p>
+                  <p>• Minimum withdrawal is NPR 500.</p>
+                  <p>• Deposit bonuses require completing turnover requirements.</p>
+                  <p>• 10% referral commission applies when your invited friend completes a deposit.</p>
                 </div>
               )}
-
               {settingTab === 'about' && (
-                <div>
-                  <h4 className="font-bold text-cyan-400 mb-1">About Arena Nepal</h4>
-                  <p className="text-[11px] text-gray-400 leading-relaxed">
-                    Arena Nepal is the ultimate esports and casual gaming tournament platform in Nepal. Play neon games, compete in tournaments, and win instant cash rewards!
-                  </p>
+                <div className="space-y-1 text-[10px]">
+                  <p className="font-bold text-pink-300">About Arena Nepal:</p>
+                  <p>The ultimate gaming & tournament platform in Nepal with secure transactions and instant rewards.</p>
                 </div>
               )}
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }

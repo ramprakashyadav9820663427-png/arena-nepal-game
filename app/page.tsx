@@ -3,28 +3,97 @@ import React, { useState, useEffect } from 'react';
 
 import RockPaperScissors from '@/components/game/RockPaperScissors';
 import GameSection from '@/components/game/GameSection';
-import NeonTowerSection from '@/components/game/NeonTowerSection';
 import TeenPattiBattle from '@/components/game/TeenPattiBattle';
 import OneCardBattle from '@/components/game/OneCardBattle';
 import RocketCrashGame from '@/components/game/RocketCrashGame';
 import CarRacingGame from '@/components/game/CarRacingGame';
 import LudoGotiSprint from '@/components/game/LudoGotiSprint';
+import ArenaSpinnerWinner from '@/components/game/ArenaSpinnerWinner';
 import TournamentSection from '@/components/TournamentSection';
 import WalletSection from '@/components/WalletSection';
 import RankSection from '@/components/RankSection';
-import LuckySpinWheel from '@/components/LuckySpinWheel';
 import DailyMissions from '@/components/DailyMissions';
 import AuthModal from '@/components/AuthModal';
+import { LanguageSelector } from '@/components/LanguageSelector';
+import { useLanguage } from './context/LanguageContext';
 import { supabase } from '@/lib/supabase';
 
 // Dummy list of recent winners for the Live Ticker
 const DUMMY_WINNERS = [
-  "🔥 User 'Sam***' won 500 💎 on Lucky Spin!",
+  "🔥 User 'Sam***' won 500 🔴 on Arena Spinner Winner!",
   "🚀 User 'Deepak99' cashed out at 4.2x on Rocket Crash!",
   "🏆 User 'Pooja_X' won 1v1 Teen Patti Battle!",
   "🃏 User 'Rahul_K' won 1,900 Red Diamonds on One Card!",
   "🎲 User 'LudoKing_99' collected 3,500 Red Diamonds on Ludo Sprint!",
   "🏎️ User 'Bikash_NP' won 3.5x on Car Racing!"
+];
+
+// 🎮 GAMES CONFIGURATION (Reference Style: Clean Image Box + Name Below)
+const GAMES_LIST = [
+  {
+    id: 'spin',
+    name: 'Arena Spinner Winner',
+    tag: 'SPIN 🎡',
+    thumbnail: '/thumbnails/spin-winner.jpg',
+    border: 'border-yellow-500/30 hover:border-yellow-400',
+    badgeBg: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'
+  },
+  {
+    id: 'teenpatti',
+    name: 'Teen Patti Battle',
+    tag: '3 ACES',
+    thumbnail: '/thumbnails/teenpatti.jpg',
+    border: 'border-yellow-500/30 hover:border-yellow-400',
+    badgeBg: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30'
+  },
+  {
+    id: 'rocket',
+    name: 'Rocket Crash',
+    tag: '10x RUSH',
+    thumbnail: '/thumbnails/rocket.jpg',
+    border: 'border-cyan-500/30 hover:border-cyan-400',
+    badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+  },
+  {
+    id: 'rps',
+    name: 'Rock Paper Scissors',
+    tag: '1v1 ARENA',
+    thumbnail: '/thumbnails/rps.jpg',
+    border: 'border-amber-500/30 hover:border-amber-400',
+    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+  },
+  {
+    id: 'neon',
+    name: 'Diamond Collector',
+    tag: 'FREE PLAY',
+    thumbnail: '/thumbnails/neon.jpg',
+    border: 'border-cyan-500/30 hover:border-cyan-400',
+    badgeBg: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30'
+  },
+  {
+    id: 'onecard',
+    name: 'One Card Battle',
+    tag: 'ACE HIGH',
+    thumbnail: '/thumbnails/onecard.jpg',
+    border: 'border-red-500/30 hover:border-red-400',
+    badgeBg: 'bg-red-500/20 text-red-300 border-red-500/30'
+  },
+  {
+    id: 'carracing',
+    name: 'Neon Car Racing',
+    tag: '3.5x SPEED',
+    thumbnail: '/thumbnails/carracing.jpg',
+    border: 'border-amber-500/30 hover:border-amber-400',
+    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+  },
+  {
+    id: 'ludogoti',
+    name: 'Ludo Goti Sprint',
+    tag: 'SPRINT',
+    thumbnail: '/thumbnails/ludo.jpg',
+    border: 'border-amber-500/30 hover:border-amber-400',
+    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+  }
 ];
 
 export default function Home() {
@@ -33,24 +102,16 @@ export default function Home() {
   const [lobbyBalance, setLobbyBalance] = useState<number>(0);
   const [dailyClaimed, setDailyClaimed] = useState<boolean>(false);
   
-  // State for Floating Spin Wheel Popup Widget
-  const [showSpinPopup, setShowSpinPopup] = useState<boolean>(false);
-
-  // State for Daily Missions Popup Modal
-  const [showDailyMissions, setShowDailyMissions] = useState<boolean>(false);
+  const { currentLang, t } = useLanguage();
   
-  // 🟢 Live Online Players State
+  const [showSpinPopup, setShowSpinPopup] = useState<boolean>(false);
+  const [showDailyMissions, setShowDailyMissions] = useState<boolean>(false);
   const [onlinePlayers, setOnlinePlayers] = useState<number>(1428);
-
-  // 🔴 Live Winner Ticker State
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState<number>(0);
-
-  // 🔒 Auth States for Login / Register Popup Overlay
   const [session, setSession] = useState<any>(null);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
   useEffect(() => {
-    // 🔒 Check Supabase User Session
     const checkUserSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
@@ -68,7 +129,6 @@ export default function Home() {
       }
     });
 
-    // 🟢 सभी रेड डायमंड्स कीज़ से सही बैलेंस लोड करें (डिफ़ॉल्ट 0)
     const getRedBalance = () => {
       try {
         const val = localStorage.getItem('arena_red_diamonds') || 
@@ -109,7 +169,6 @@ export default function Home() {
       });
     }, 4000);
 
-    // Rotate winner ticker every 3.5 seconds
     const winnerInterval = setInterval(() => {
       setCurrentWinnerIndex((prev) => (prev + 1) % DUMMY_WINNERS.length);
     }, 3500);
@@ -134,49 +193,52 @@ export default function Home() {
     localStorage.setItem('arena_white_diamonds', newWhiteBal.toString());
     window.dispatchEvent(new Event('storage'));
 
-    alert('🎁 Daily Bonus Claimed! +1000 White Diamonds added to your wallet!');
+    alert(currentLang === 'ne' ? '🎁 दैनिक बोनस प्राप्त भयो! +1000 सेतो हिरा थपियो!' : '🎁 Daily Bonus Claimed! +1000 White Diamonds added to your wallet!');
   };
 
   return (
     <main className="min-h-screen bg-black text-white flex flex-col items-center pb-24 select-none relative">
-      {/* Top Header / Lobby Bar with Live Balance */}
-      <header className="w-full max-w-md p-4 flex items-center justify-between border-b border-gray-800 bg-gray-900/80 backdrop-blur-md sticky top-0 z-40 shadow-lg">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-1.5">
-            <span className="text-base animate-pulse">⚡</span>
-            <h1 className="text-xs font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 tracking-wider">
-              ARENA NEPAL LOBBY
-            </h1>
-          </div>
-          <div className="flex items-center gap-1 mt-0.5 ml-5">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-ping"></span>
-            <span className="text-[9px] text-green-400 font-bold tracking-tight">
-              {onlinePlayers.toLocaleString()} Players Online
-            </span>
+      {/* Top Header / Lobby Bar */}
+      <header className="w-full max-w-md p-3 flex items-center justify-between border-b border-gray-800 bg-gray-900/80 backdrop-blur-md sticky top-0 z-40 shadow-lg">
+        <div className="flex items-center gap-2">
+          <LanguageSelector />
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1">
+              <span className="text-sm animate-pulse">⚡</span>
+              <h1 className="text-[10px] font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 tracking-wider uppercase">
+                {t.appTitle || "ARENA NEPAL LOBBY"}
+              </h1>
+            </div>
+            <div className="flex items-center gap-1 mt-0.5 ml-4">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-ping"></span>
+              <span className="text-[8px] text-green-400 font-bold tracking-tight">
+                {onlinePlayers.toLocaleString()} {t.playersOnline || "Players Online"}
+              </span>
+            </div>
           </div>
         </div>
         
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           {session ? (
-            <div className="flex items-center gap-1.5 bg-gradient-to-r from-red-950/80 to-purple-950/80 px-3 py-1.5 rounded-xl border border-red-500/40 shadow-inner">
+            <div className="flex items-center gap-1.5 bg-gradient-to-r from-red-950/80 to-purple-950/80 px-2.5 py-1 rounded-xl border border-red-500/40 shadow-inner">
               <span className="text-xs">🔴</span>
               <span className="text-xs font-black text-red-400">{lobbyBalance}</span>
             </div>
           ) : (
             <button
               onClick={() => setShowAuthModal(true)}
-              className="text-[10px] font-black bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-black px-3 py-1.5 rounded-xl shadow-lg hover:scale-105 transition-all cursor-pointer"
+              className="text-[10px] font-black bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-black px-2.5 py-1.5 rounded-xl shadow-lg hover:scale-105 transition-all cursor-pointer"
             >
-              Login / Register
+              {t.loginRegister || "Login / Register"}
             </button>
           )}
 
           {selectedGame && (
             <button 
               onClick={() => setSelectedGame(null)}
-              className="text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40 px-3 py-1.5 rounded-xl cursor-pointer hover:bg-red-500/30 transition-all"
+              className="text-[10px] font-extrabold bg-red-500/20 text-red-400 border border-red-500/40 px-2.5 py-1.5 rounded-xl cursor-pointer hover:bg-red-500/30 transition-all"
             >
-              ← Back
+              ← {t.back || "Back"}
             </button>
           )}
         </div>
@@ -186,12 +248,12 @@ export default function Home() {
       <div className="w-full max-w-md flex flex-col items-center flex-1 p-4 gap-4">
         {activeTab === 'home' && (
           <>
-            {selectedGame === 'rps' ? (
+            {selectedGame === 'spin' ? (
+              <ArenaSpinnerWinner />
+            ) : selectedGame === 'rps' ? (
               <RockPaperScissors />
             ) : selectedGame === 'neon' ? (
               <GameSection />
-            ) : selectedGame === 'neontower' ? (
-              <NeonTowerSection onBackToLobby={() => setSelectedGame(null)} />
             ) : selectedGame === 'teenpatti' ? (
               <TeenPattiBattle onBackToLobby={() => setSelectedGame(null)} />
             ) : selectedGame === 'onecard' ? (
@@ -205,7 +267,7 @@ export default function Home() {
             ) : (
               <div className="w-full flex flex-col gap-4">
                 
-                {/* 🎯 YOUR DAILY MISSION WIDE BANNER (Top of Lobby) */}
+                {/* 🎯 DAILY MISSION BANNER */}
                 <div 
                   onClick={() => setShowDailyMissions(true)}
                   className="w-full bg-gradient-to-r from-yellow-500/20 via-purple-600/20 to-pink-500/20 border border-yellow-500/50 p-3.5 rounded-2xl flex items-center justify-between shadow-lg cursor-pointer hover:scale-[1.02] hover:border-yellow-400 transition-all group"
@@ -216,17 +278,17 @@ export default function Home() {
                     </div>
                     <div>
                       <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                        Your Daily Mission <span className="text-[9px] bg-yellow-400 text-black px-1.5 py-0.2 rounded-full font-extrabold">NEW</span>
+                        {t.dailyMissionTitle || "Your Daily Mission"} <span className="text-[9px] bg-yellow-400 text-black px-1.5 py-0.2 rounded-full font-extrabold">NEW</span>
                       </h3>
-                      <p className="text-[10px] text-gray-300 mt-0.5">Complete tasks & refer friends for rewards!</p>
+                      <p className="text-[10px] text-gray-300 mt-0.5">{t.dailyMissionDesc || "Complete tasks & refer friends for rewards!"}</p>
                     </div>
                   </div>
                   <span className="text-xs font-black bg-gradient-to-r from-yellow-400 to-pink-500 text-black px-3 py-1.5 rounded-xl shadow">
-                    View →
+                    {t.viewButton || "View"} →
                   </span>
                 </div>
 
-                {/* 🔴 LIVE WINNER TICKER BAR */}
+                {/* 🔴 LIVE WINNER TICKER */}
                 <div className="w-full bg-gradient-to-r from-yellow-500/10 via-pink-500/10 to-purple-500/10 border border-yellow-500/30 px-3 py-2 rounded-2xl flex items-center gap-2.5 shadow-md overflow-hidden">
                   <span className="text-sm animate-bounce">📢</span>
                   <div className="flex-1 overflow-hidden">
@@ -235,7 +297,7 @@ export default function Home() {
                     </p>
                   </div>
                   <span className="text-[9px] font-black bg-yellow-400/20 text-yellow-400 border border-yellow-400/40 px-2 py-0.5 rounded-full uppercase">
-                    Live
+                    LIVE
                   </span>
                 </div>
 
@@ -246,13 +308,13 @@ export default function Home() {
                   
                   <div>
                     <span className="text-[10px] font-black bg-pink-500/20 text-pink-400 border border-pink-500/30 px-2.5 py-1 rounded-full uppercase tracking-widest">
-                      🔥 Season 1 Live
+                      🔥 SEASON 1 LIVE
                     </span>
                     <h2 className="text-base font-black text-white mt-2 leading-tight">
-                      Play & Win Mega Tournaments!
+                      {t.playMegaTitle || "Play & Win Mega Tournaments!"}
                     </h2>
                     <p className="text-[11px] text-gray-300 mt-1">
-                      Compete in 1v1 arenas, climb leaderboards & cash out instantly.
+                      {t.playMegaDesc || "Compete in 1v1 arenas, climb leaderboards & cash out instantly."}
                     </p>
                   </div>
 
@@ -260,8 +322,8 @@ export default function Home() {
                     <div className="flex items-center gap-2">
                       <span className="text-lg">🎁</span>
                       <div>
-                        <p className="text-[11px] font-bold text-white">Daily Login Bonus</p>
-                        <p className="text-[9px] text-cyan-400 font-semibold">+1000 White Diamonds Free</p>
+                        <p className="text-[11px] font-bold text-white">{t.dailyLoginBonus || "Daily Login Bonus"}</p>
+                        <p className="text-[9px] text-cyan-400 font-semibold">{t.freeDiamonds || "+1000 White Diamonds Free"}</p>
                       </div>
                     </div>
                     <button
@@ -273,7 +335,7 @@ export default function Home() {
                           : 'bg-gradient-to-r from-cyan-400 to-blue-500 text-black hover:scale-105'
                       }`}
                     >
-                      {dailyClaimed ? 'Claimed ✓' : 'Claim Now'}
+                      {dailyClaimed ? (t.claimed || 'Claimed ✓') : (t.claim || 'Claim Now')}
                     </button>
                   </div>
                 </div>
@@ -281,186 +343,45 @@ export default function Home() {
                 {/* Section Title */}
                 <div className="flex items-center justify-between px-1">
                   <h3 className="text-xs font-black text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <span>⚡</span> Featured Arcade Games
+                    <span>⚡</span> {t.specialArcade || "Featured Arcade Games"}
                   </h3>
-                  <span className="text-[10px] text-cyan-400 font-bold">8 Games Available</span>
+                  <span className="text-[10px] text-cyan-400 font-bold">8 {t.availableGames || "Games Available"}</span>
                 </div>
 
-                {/* Games Grid (Neon Diamond Collector placed right where you marked in the image grid) */}
+                {/* 🎮 REFERENCE STYLE GAMES GRID: CLEAN THUMBNAIL + NAME BELOW */}
                 <div className="grid grid-cols-2 gap-3.5 w-full">
-                  
-                  {/* 1. Teen Patti Left vs Right */}
-                  <div 
-                    onClick={() => setSelectedGame('teenpatti')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-yellow-500/60 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-yellow-400 hover:shadow-yellow-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded-full border border-yellow-500/30 flex items-center gap-1">
-                      <span>🃏</span> 3 Aces Hot
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-yellow-500 to-amber-700 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform relative">
-                        🎴
-                        <span className="absolute -bottom-1 -right-1 bg-red-600 text-[8px] text-white font-black px-1 rounded shadow">A♠</span>
+                  {GAMES_LIST.map((game) => (
+                    <div 
+                      key={game.id}
+                      onClick={() => setSelectedGame(game.id)}
+                      className="flex flex-col cursor-pointer group"
+                    >
+                      {/* Thumbnail Container */}
+                      <div className={`relative w-full h-28 rounded-2xl overflow-hidden border ${game.border} shadow-xl bg-gray-900 group-hover:scale-[1.03] transition-all`}>
+                        <img 
+                          src={game.thumbnail} 
+                          alt={game.name} 
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        />
+                        {/* Top Badge Tag */}
+                        <div className={`absolute top-2 right-2 text-[8px] font-black px-2 py-0.5 rounded-full border shadow-md backdrop-blur-md ${game.badgeBg}`}>
+                          {game.tag}
+                        </div>
                       </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Teen Patti Left vs Right</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">3 Bada Taash Ekka (Aces) Battle</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-yellow-300 font-bold bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/20">🔥 15s Timer</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-yellow-400 to-amber-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
 
-                  {/* 2. Neon Rocket Crash */}
-                  <div 
-                    onClick={() => setSelectedGame('rocket')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-cyan-500/60 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 hover:shadow-cyan-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30 flex items-center gap-1">
-                      <span>🚀</span> 10x Mega Chip
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-cyan-400 to-indigo-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform relative">
-                        🚀
-                        <span className="absolute -bottom-1 -right-1 bg-cyan-500 text-[8px] text-black font-black px-1 rounded shadow">10x</span>
+                      {/* Game Name Clearly Below Thumbnail */}
+                      <div className="mt-1.5 px-1 flex items-center justify-between">
+                        <h3 className="text-[11px] font-bold text-gray-200 tracking-wide group-hover:text-yellow-400 transition-colors truncate">
+                          {game.name}
+                        </h3>
+                        <span className="text-[10px] text-yellow-400 font-black group-hover:translate-x-1 transition-transform">
+                          ▶
+                        </span>
                       </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Rocket Crash ⚡</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Aviator-style high multiplier flight.</p>
                     </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-cyan-300 font-bold bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">⚡ Live Multiplier</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-cyan-400 to-blue-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  {/* 3. Rock • Paper • Scissors */}
-                  <div 
-                    onClick={() => setSelectedGame('rps')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      ✊ 1v1 Arena
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-amber-500 to-orange-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
-                        ✊
-                      </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Rock • Paper • Scissors</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Fast hand-sign Diamond battle</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">⚡ Instant Win</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-orange-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  {/* 4. Neon Diamond Collector (Placed right here in the grid slot as marked in your screenshot!) */}
-                  <div 
-                    onClick={() => setSelectedGame('neon')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-cyan-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-cyan-400 hover:shadow-cyan-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-cyan-500/20 text-cyan-400 px-2 py-0.5 rounded-full border border-cyan-500/30">
-                      💎 Free Arcade
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
-                        💎
-                      </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Diamond Collector</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Collect free diamonds & bonus rewards</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-cyan-300 font-bold bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">✨ Free Play</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-cyan-400 to-blue-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  {/* 5. One Card High Battle */}
-                  <div 
-                    onClick={() => setSelectedGame('onecard')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-red-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-red-400 hover:shadow-red-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
-                      🎴 Single Ace
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-red-600 to-rose-800 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform relative">
-                        🎴
-                        <span className="absolute -bottom-1 -right-1 bg-yellow-400 text-[8px] text-black font-black px-1 rounded shadow">A♥</span>
-                      </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">One Card High Battle</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Seedha ek bada Ekka (Ace) bet</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-red-300 font-bold bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">🔥 High Reward</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-red-500 to-rose-600 text-white px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  {/* 6. Neon Car Racing */}
-                  <div 
-                    onClick={() => setSelectedGame('carracing')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      🏎️ 3.5x Mode
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-red-600 to-yellow-500 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
-                        🏎️
-                      </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Car Racing 🏁</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Car racing action mode up to 3.5x</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-yellow-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">🏁 Speed Rush</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-yellow-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  {/* 7. Neon Tower Sprint */}
-                  <div 
-                    onClick={() => setSelectedGame('neontower')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-red-500/40 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-red-400 hover:shadow-red-500/10 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-red-500/20 text-red-400 px-2 py-0.5 rounded-full border border-red-500/30">
-                      🗼 Tower Sprint
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-red-500 to-rose-700 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
-                        🗼
-                      </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Neon Tower Sprint</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Attractive vertical climb arcade</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-red-300 font-bold bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">🚀 Climb High</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-red-500 to-rose-600 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
-                  {/* 8. Ludo Goti Sprint */}
-                  <div 
-                    onClick={() => setSelectedGame('ludogoti')}
-                    className="bg-gradient-to-b from-gray-900/90 to-gray-950 border border-amber-500/50 p-4 rounded-3xl flex flex-col justify-between cursor-pointer hover:border-amber-400 hover:shadow-amber-500/20 transition-all shadow-xl active:scale-95 group relative overflow-hidden"
-                  >
-                    <div className="absolute top-2 right-2 text-[9px] font-bold bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30">
-                      🎲 Ludo Goti
-                    </div>
-                    <div>
-                      <div className="w-11 h-11 bg-gradient-to-br from-amber-500 to-yellow-600 rounded-2xl flex items-center justify-center text-xl shadow-md mb-3 group-hover:scale-105 transition-transform">
-                        🎲
-                      </div>
-                      <h3 className="text-xs font-black text-white leading-tight mb-1">Ludo Goti Sprint</h3>
-                      <p className="text-[10px] text-gray-400 leading-snug">Ludo board gotiyan & sprint vibe</p>
-                    </div>
-                    <div className="mt-4 flex justify-between items-center">
-                      <span className="text-[9px] text-yellow-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">🎯 Board Sprint</span>
-                      <span className="text-[10px] font-black bg-gradient-to-r from-amber-400 to-yellow-500 text-black px-3 py-1.5 rounded-xl shadow">Play Now</span>
-                    </div>
-                  </div>
-
+                  ))}
                 </div>
+
               </div>
             )}
           </>
@@ -471,12 +392,12 @@ export default function Home() {
         {activeTab === 'wallet' && <WalletSection />}
       </div>
 
-      {/* 🎯 DAILY MISSIONS POPUP MODAL */}
+      {/* 🎯 DAILY MISSIONS MODAL */}
       {showDailyMissions && (
         <DailyMissions onClose={() => setShowDailyMissions(false)} />
       )}
 
-      {/* 🔒 LOGIN / REGISTER MODAL POPUP OVERLAY */}
+      {/* 🔒 AUTH MODAL OVERLAY */}
       {showAuthModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="relative w-full max-w-sm bg-gray-900 border border-yellow-500/50 rounded-3xl p-5 shadow-2xl animate-in fade-in zoom-in duration-200">
@@ -493,7 +414,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* 🎡 FLOATING LUCKY SPIN WIDGET (Corner Popup Style) */}
+      {/* 🎡 FLOATING LUCKY SPIN WIDGET */}
       <div className="fixed bottom-20 right-4 z-40 flex flex-col items-end">
         {!showSpinPopup && (
           <button
@@ -502,48 +423,59 @@ export default function Home() {
             title="Lucky Spin Wheel"
           >
             <span className="text-2xl">🎡</span>
-            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white">
+            <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white uppercase">
               SPIN
             </span>
           </button>
         )}
 
-        {/* POPUP MODAL CONTAINER */}
         {showSpinPopup && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="relative w-full max-w-sm bg-gray-900 border border-yellow-500/50 rounded-2xl p-4 shadow-2xl animate-in fade-in zoom-in duration-200">
-              {/* Close (Cut) Button */}
               <button
                 onClick={() => setShowSpinPopup(false)}
                 className="absolute top-3 right-3 bg-red-600/80 hover:bg-red-600 text-white w-7 h-7 rounded-full font-bold flex items-center justify-center text-xs shadow transition-all cursor-pointer z-10"
               >
                 ✕
               </button>
-
-              {/* Lucky Spin Wheel Component Render */}
-              <LuckySpinWheel />
+              <ArenaSpinnerWinner />
             </div>
           </div>
         )}
       </div>
 
       {/* Bottom Navigation Bar */}
-      <nav className="w-full max-w-md fixed bottom-0 bg-gray-950/90 backdrop-blur-md border-t border-gray-800 flex items-center justify-around py-2.5 z-40 shadow-2xl">
-        <button onClick={() => { setActiveTab('home'); setSelectedGame(null); }} className={`flex flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'home' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
-          <span className="text-xl">🏠</span>
-          <span className="text-[10px] mt-0.5 font-bold">Home</span>
+      <nav className="w-full max-w-md fixed bottom-0 bg-gray-950/90 backdrop-blur-md border-t border-gray-805 flex items-center justify-around py-2.5 z-40 shadow-2xl">
+        <button 
+          onClick={() => { setActiveTab('home'); setSelectedGame(null); }} 
+          className={`flex flex-col items-center py-1 px-4 rounded-xl transition-all cursor-pointer ${activeTab === 'home' ? 'text-yellow-400 scale-105 font-bold' : 'text-gray-400 hover:text-white'}`}
+        >
+          <span className="text-lg">🏠</span>
+          <span className="text-[10px] mt-0.5">{t.navHome || "Home"}</span>
         </button>
-        <button onClick={() => { setActiveTab('tournament'); setSelectedGame(null); }} className={`flex flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'tournament' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
-          <span className="text-xl">🏆</span>
-          <span className="text-[10px] mt-0.5 font-bold">Tournament</span>
+
+        <button 
+          onClick={() => setActiveTab('tournament')} 
+          className={`flex flex-col items-center py-1 px-4 rounded-xl transition-all cursor-pointer ${activeTab === 'tournament' ? 'text-yellow-400 scale-105 font-bold' : 'text-gray-400 hover:text-white'}`}
+        >
+          <span className="text-lg">🏆</span>
+          <span className="text-[10px] mt-0.5">{t.navTournaments || "Tournaments"}</span>
         </button>
-        <button onClick={() => { setActiveTab('rank'); setSelectedGame(null); }} className={`flex quer flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'rank' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
-          <span className="text-xl">⭐</span>
-          <span className="text-[10px] mt-0.5 font-bold">Rank</span>
+
+        <button 
+          onClick={() => setActiveTab('rank')} 
+          className={`flex flex-col items-center py-1 px-4 rounded-xl transition-all cursor-pointer ${activeTab === 'rank' ? 'text-yellow-400 scale-105 font-bold' : 'text-gray-400 hover:text-white'}`}
+        >
+          <span className="text-lg">👑</span>
+          <span className="text-[10px] mt-0.5">{t.navRanks || "Ranks"}</span>
         </button>
-        <button onClick={() => { setActiveTab('wallet'); setSelectedGame(null); }} className={`flex flex-col items-center py-1 px-4 rounded-2xl transition-all cursor-pointer ${activeTab === 'wallet' ? 'text-yellow-400 bg-yellow-500/10' : 'text-gray-400 hover:text-white'}`}>
-          <span className="text-xl">💰</span>
-          <span className="text-[10px] mt-0.5 font-bold">Account</span>
+
+        <button 
+          onClick={() => setActiveTab('wallet')} 
+          className={`flex flex-col items-center py-1 px-4 rounded-xl transition-all cursor-pointer ${activeTab === 'wallet' ? 'text-yellow-400 scale-105 font-bold' : 'text-gray-400 hover:text-white'}`}
+        >
+          <span className="text-lg">💰</span>
+          <span className="text-[10px] mt-0.5">{t.navWallet || "Wallet"}</span>
         </button>
       </nav>
     </main>
