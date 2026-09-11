@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UserWallet, TabType } from '../../types/game';
 import AuthModal from '../AuthModal'; 
 import { translations } from '../../lib/translations';
+import { supabase } from '@/lib/supabase';
 
 interface NavbarProps {
   wallet: UserWallet;
@@ -18,8 +19,53 @@ export default function Navbar({
 }: NavbarProps) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [currentLang, setCurrentLang] = useState<'en' | 'ne'>('en');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const t = translations[currentLang];
+
+  // चेक करो कि यूजर सच में Supabase में लॉग इन है या नहीं
+  useEffect(() => {
+    const checkUserSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const localToken = localStorage.getItem('arena_user_token');
+      
+      if (session || localToken) {
+        setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
+      }
+    };
+
+    checkUserSession();
+
+    // सेशन बदलाव को ट्रैक करने के लिए
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        setIsLoggedIn(true);
+        localStorage.setItem('arena_user_token', 'email_logged_in');
+      } else {
+        setIsLoggedIn(false);
+        localStorage.removeItem('arena_user_token');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  // 🚪 Logout Function
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      localStorage.removeItem('arena_user_token');
+      localStorage.removeItem('arena_referred_by');
+      setIsLoggedIn(false);
+      window.location.reload();
+    } catch (error: any) {
+      alert('Error logging out: ' + error.message);
+    }
+  };
 
   return (
     <>
@@ -90,12 +136,22 @@ export default function Navbar({
             <span className="text-cyan-300">💎 {wallet.whiteDiamonds}</span>
           </div>
 
-          <button
-            onClick={() => setIsAuthModalOpen(true)}
-            className="px-4 py-2 bg-yellow-500 text-gray-950 font-bold rounded-xl text-sm hover:bg-yellow-400 transition whitespace-nowrap"
-          >
-            {t.login} / {t.register}
-          </button>
+          {/* यहीं पर Login/Register की जगह अब Logout बटन दिखेगा अगर यूजर लॉग इन है */}
+          {isLoggedIn ? (
+            <button
+              onClick={handleLogout}
+              className="px-4 py-2 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-500 transition whitespace-nowrap flex items-center gap-1.5 shadow-lg cursor-pointer"
+            >
+              <span>🚪</span> {currentLang === 'ne' ? 'लगआउट' : 'Logout'}
+            </button>
+          ) : (
+            <button
+              onClick={() => setIsAuthModalOpen(true)}
+              className="px-4 py-2 bg-yellow-500 text-gray-950 font-bold rounded-xl text-sm hover:bg-yellow-400 transition whitespace-nowrap cursor-pointer"
+            >
+              {t.login} / {t.register}
+            </button>
+          )}
         </div>
       </header>
 
