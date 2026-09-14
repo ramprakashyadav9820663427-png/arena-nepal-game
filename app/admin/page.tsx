@@ -31,12 +31,6 @@ export default function AdminPage() {
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
-  /*
-   * IMPORTANT:
-   * Change this password before production.
-   * Client-side passwords are NOT secure for a real production admin.
-   * This is only a temporary admin UI.
-   */
   const ADMIN_PASSWORD = 'admin123';
 
   useEffect(() => {
@@ -77,7 +71,8 @@ export default function AdminPage() {
     setProfile(null);
     setUsers([]);
     setTargetUid('');
-    showMessage('');
+    setMessage('');
+    setErrorMessage('');
   };
 
   const loadUsers = async () => {
@@ -259,9 +254,7 @@ export default function AdminPage() {
             <div className="mb-8 text-center">
               <div className="mb-3 text-5xl">🛡️</div>
 
-              <h1 className="text-3xl font-black">
-                Arena Nepal
-              </h1>
+              <h1 className="text-3xl font-black">Arena Nepal</h1>
 
               <p className="mt-2 text-sm text-zinc-400">
                 Admin Control Panel
@@ -305,7 +298,6 @@ export default function AdminPage() {
   return (
     <main className="min-h-screen bg-black px-4 py-6 text-white">
       <div className="mx-auto max-w-7xl">
-        {/* HEADER */}
         <header className="mb-6 flex flex-col gap-4 rounded-3xl border border-zinc-800 bg-zinc-950 p-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-bold uppercase tracking-[0.25em] text-cyan-400">
@@ -330,7 +322,6 @@ export default function AdminPage() {
           </button>
         </header>
 
-        {/* MESSAGES */}
         {message && (
           <div className="mb-5 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm font-bold text-emerald-300">
             {message}
@@ -344,15 +335,12 @@ export default function AdminPage() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-2">
-          {/* SEARCH USER */}
           <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
             <div className="mb-5">
-              <h2 className="text-xl font-black">
-                🔎 Find User
-              </h2>
+              <h2 className="text-xl font-black">🔎 Find User</h2>
 
               <p className="mt-1 text-sm text-zinc-500">
-                Search using the user's Game UID.
+                Search using the user Game UID.
               </p>
             </div>
 
@@ -377,9 +365,7 @@ export default function AdminPage() {
             {profile && (
               <div className="mt-5 rounded-2xl border border-zinc-800 bg-black p-4">
                 <div className="mb-4 flex items-center justify-between">
-                  <h3 className="font-black">
-                    User Details
-                  </h3>
+                  <h3 className="font-black">User Details</h3>
 
                   <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-300">
                     Found
@@ -389,6 +375,7 @@ export default function AdminPage() {
                 <div className="space-y-2 text-sm">
                   <div className="flex justify-between gap-4">
                     <span className="text-zinc-500">UID</span>
+
                     <span className="font-bold">
                       {profile.user_uid || 'N/A'}
                     </span>
@@ -396,6 +383,7 @@ export default function AdminPage() {
 
                   <div className="flex justify-between gap-4">
                     <span className="text-zinc-500">Username</span>
+
                     <span className="font-bold">
                       {profile.username || 'N/A'}
                     </span>
@@ -403,6 +391,7 @@ export default function AdminPage() {
 
                   <div className="flex justify-between gap-4">
                     <span className="text-zinc-500">Email</span>
+
                     <span className="max-w-[60%] break-all text-right font-bold">
                       {profile.email || 'N/A'}
                     </span>
@@ -440,9 +429,7 @@ export default function AdminPage() {
             )}
           </section>
 
-          {/* RED DIAMOND MANAGEMENT */}
           <section className="space-y-6">
-            {/* ADD */}
             <div className="rounded-3xl border border-emerald-500/20 bg-zinc-950 p-5">
               <div className="mb-5">
                 <h2 className="text-xl font-black text-emerald-300">
@@ -475,7 +462,6 @@ export default function AdminPage() {
               </form>
             </div>
 
-            {/* REMOVE */}
             <div className="rounded-3xl border border-red-500/20 bg-zinc-950 p-5">
               <div className="mb-5">
                 <h2 className="text-xl font-black text-red-300">
@@ -517,13 +503,10 @@ export default function AdminPage() {
           </section>
         </div>
 
-        {/* USERS */}
         <section className="mt-6 rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
           <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="text-xl font-black">
-                👥 Users
-              </h2>
+              <h2 className="text-xl font-black">👥 Users</h2>
 
               <p className="mt-1 text-sm text-zinc-500">
                 Recently created users.
@@ -542,7 +525,7 @@ export default function AdminPage() {
 
           {users.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-zinc-800 p-8 text-center text-sm text-zinc-500">
-              Click “Refresh Users” to load users.
+              Click &quot;Refresh Users&quot; to load users.
             </div>
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-zinc-800">
@@ -552,15 +535,19 @@ export default function AdminPage() {
                     <th className="px-4 py-3 text-zinc-500">
                       UID
                     </th>
+
                     <th className="px-4 py-3 text-zinc-500">
                       Username
                     </th>
+
                     <th className="px-4 py-3 text-zinc-500">
                       Email
                     </th>
+
                     <th className="px-4 py-3 text-zinc-500">
                       Red Diamonds
                     </th>
+
                     <th className="px-4 py-3 text-zinc-500">
                       White Diamonds
                     </th>
@@ -606,7 +593,6 @@ export default function AdminPage() {
           )}
         </section>
 
-        {/* FOOTER */}
         <footer className="py-8 text-center text-xs text-zinc-600">
           Arena Nepal Admin Panel
         </footer>
