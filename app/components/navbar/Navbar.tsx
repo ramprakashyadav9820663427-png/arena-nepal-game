@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { UserWallet, TabType } from '../../types/game';
 import AuthModal from '../AuthModal';
 import InstallAppButton from '../InstallAppButton';
@@ -19,23 +19,31 @@ export default function Navbar({
   setActiveTab,
 }: NavbarProps) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [currentLang, setCurrentLang] = useState<'en' | 'ne'>('en');
+  const [currentLang] = useState<'en' | 'ne'>('en');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
 
   const t = translations[currentLang];
 
   useEffect(() => {
+    let mounted = true;
+
     const checkUserSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-      const localToken = localStorage.getItem('arena_user_token');
+        const localToken = localStorage.getItem('arena_user_token');
 
-      if (session || localToken) {
-        setIsLoggedIn(true);
-      } else {
-        setIsLoggedIn(false);
+        if (mounted) {
+          setIsLoggedIn(Boolean(session || localToken));
+        }
+      } catch (error) {
+        console.error('Session check failed:', error);
+
+        if (mounted) {
+          setIsLoggedIn(false);
+        }
       }
     };
 
@@ -44,6 +52,8 @@ export default function Navbar({
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+
       if (session) {
         setIsLoggedIn(true);
         localStorage.setItem('arena_user_token', 'email_logged_in');
@@ -54,11 +64,11 @@ export default function Navbar({
     });
 
     return () => {
+      mounted = false;
       subscription.unsubscribe();
     };
   }, []);
 
-  // 🚪 Logout Function
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
@@ -69,8 +79,11 @@ export default function Navbar({
       setIsLoggedIn(false);
 
       window.location.reload();
-    } catch (error: any) {
-      alert('Error logging out: ' + error.message);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unknown logout error';
+
+      alert('Error logging out: ' + message);
     }
   };
 
@@ -90,11 +103,12 @@ export default function Navbar({
             </span>
           </div>
 
-          <div className="ml-2"></div>
+          <div className="ml-2" />
         </div>
 
         <nav className="flex gap-2 bg-gray-800 p-1 rounded-xl overflow-x-auto max-w-full">
           <button
+            type="button"
             onClick={() => setActiveTab('game')}
             className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
               activeTab === 'game'
@@ -106,6 +120,7 @@ export default function Navbar({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('tournament')}
             className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
               activeTab === 'tournament'
@@ -117,6 +132,7 @@ export default function Navbar({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('rank')}
             className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
               activeTab === 'rank'
@@ -128,6 +144,7 @@ export default function Navbar({
           </button>
 
           <button
+            type="button"
             onClick={() => setActiveTab('wallet')}
             className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all whitespace-nowrap ${
               activeTab === 'wallet'
@@ -135,7 +152,7 @@ export default function Navbar({
                 : 'text-gray-300 hover:text-white'
             }`}
           >
-            {t.live}
+            {t.navWallet}
           </button>
         </nav>
 
@@ -152,12 +169,11 @@ export default function Navbar({
             </span>
           </div>
 
-          {/* 📲 PWA Install Button */}
           <InstallAppButton />
 
-          {/* 🔐 Login / Logout */}
           {isLoggedIn ? (
             <button
+              type="button"
               onClick={handleLogout}
               className="px-4 py-2 bg-red-600 text-white font-bold rounded-xl text-sm hover:bg-red-500 transition whitespace-nowrap flex items-center gap-1.5 shadow-lg cursor-pointer"
             >
@@ -166,10 +182,11 @@ export default function Navbar({
             </button>
           ) : (
             <button
+              type="button"
               onClick={() => setIsAuthModalOpen(true)}
               className="px-4 py-2 bg-yellow-500 text-gray-950 font-bold rounded-xl text-sm hover:bg-yellow-400 transition whitespace-nowrap cursor-pointer"
             >
-              {t.login} / {t.register}
+              {t.loginRegister}
             </button>
           )}
         </div>
