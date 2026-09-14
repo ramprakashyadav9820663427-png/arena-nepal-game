@@ -1,19 +1,39 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
-const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
+const supabaseAnonKey =
+  'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
+
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+type ActiveTab = 'daily' | 'night' | 'mega';
+
+type LeaderboardItem = {
+  rank: number;
+  name: string;
+  points: string;
+  prize: string;
+};
 
 export default function RankPage() {
   const [currentUserName, setCurrentUserName] = useState('Player');
-  const [activeTab, setActiveTab] = useState<'daily' | 'night' | 'mega'>('daily');
-  
-  const [dailyLeaderboard, setDailyLeaderboard] = useState<any[]>([]);
-  const [nightLeaderboard, setNightLeaderboard] = useState<any[]>([]);
-  const [megaLeaderboard, setMegaLeaderboard] = useState<any[]>([]);
-  
+  const [activeTab, setActiveTab] = useState<ActiveTab>('daily');
+
+  const [dailyLeaderboard, setDailyLeaderboard] = useState<
+    LeaderboardItem[]
+  >([]);
+
+  const [nightLeaderboard, setNightLeaderboard] = useState<
+    LeaderboardItem[]
+  >([]);
+
+  const [megaLeaderboard, setMegaLeaderboard] = useState<
+    LeaderboardItem[]
+  >([]);
+
   const [userRankData, setUserRankData] = useState({
     rank: '--',
     name: 'Player (YOU)',
@@ -21,124 +41,223 @@ export default function RankPage() {
     points: '0',
   });
 
-  // Load username & sync red diamonds
+  // Load username
   useEffect(() => {
     try {
       const savedName = localStorage.getItem('arena_username');
-      if (savedName) setCurrentUserName(savedName);
-    } catch (e) {
-      console.error(e);
+
+      if (savedName) {
+        setCurrentUserName(savedName);
+      }
+    } catch (error) {
+      console.error('Error loading username:', error);
     }
   }, []);
 
-  // Automatic Red Diamond Prizing Distribution Simulation
-  const distributeAutomaticPrizes = (leaderboardData: any[], prizePerWinner: number) => {
-    try {
-      const savedName = localStorage.getItem('arena_username');
-      const userEntry = leaderboardData.find((item) => item.name === savedName);
-      
-      // If current user is in the winning slots, automatically add red diamonds if not already claimed for this cycle
-      if (userEntry && userEntry.rank <= leaderboardData.length) {
-        const claimedKey = `claimed_prize_${activeTab}_${new Date().toDateString()}`;
-        const alreadyClaimed = localStorage.getItem(claimedKey);
+  // Automatic Red Diamond prize distribution simulation
+  const distributeAutomaticPrizes = useCallback(
+    (leaderboardData: LeaderboardItem[], prizePerWinner: number) => {
+      try {
+        const savedName = localStorage.getItem('arena_username');
 
-        if (!alreadyClaimed) {
-          const currentDias = parseInt(localStorage.getItem('arena_red_diamonds') || '150', 10);
-          const newTotal = currentDias + prizePerWinner;
-          
-          localStorage.setItem('arena_red_diamonds', newTotal.toString());
-          localStorage.setItem('arena_red_dias', newTotal.toString());
-          localStorage.setItem('arena_diamond', newTotal.toString());
-          localStorage.setItem('arena_cash', newTotal.toString());
-          localStorage.setItem(claimedKey, 'true');
-          
-          window.dispatchEvent(new Event('storage'));
-          console.log(`🎉 Automatic Reward Distributed: +${prizePerWinner} Red Diamonds!`);
+        if (!savedName) {
+          return;
         }
-      }
-    } catch (err) {
-      console.error('Error distributing prize:', err);
-    }
-  };
 
-  // Fetch Rankings from Supabase
-  const fetchRankingsFromSupabase = async () => {
+        const userEntry = leaderboardData.find(
+          (item) => item.name === savedName
+        );
+
+        if (userEntry && userEntry.rank <= leaderboardData.length) {
+          const claimedKey = `claimed_prize_${activeTab}_${new Date().toDateString()}`;
+
+          const alreadyClaimed = localStorage.getItem(claimedKey);
+
+          if (!alreadyClaimed) {
+            const currentDias = parseInt(
+              localStorage.getItem('arena_red_diamonds') || '150',
+              10
+            );
+
+            const newTotal = currentDias + prizePerWinner;
+
+            localStorage.setItem(
+              'arena_red_diamonds',
+              newTotal.toString()
+            );
+
+            localStorage.setItem(
+              'arena_red_dias',
+              newTotal.toString()
+            );
+
+            localStorage.setItem(
+              'arena_diamond',
+              newTotal.toString()
+            );
+
+            localStorage.setItem(
+              'arena_cash',
+              newTotal.toString()
+            );
+
+            localStorage.setItem(claimedKey, 'true');
+
+            window.dispatchEvent(new Event('storage'));
+
+            console.log(
+              `Automatic Reward Distributed: +${prizePerWinner} Red Diamonds`
+            );
+          }
+        }
+      } catch (error) {
+        console.error(
+          'Error distributing prize:',
+          error
+        );
+      }
+    },
+    [activeTab]
+  );
+
+  // Fetch rankings from Supabase
+  const fetchRankingsFromSupabase = useCallback(async () => {
     try {
-      // 1. Daily (Top 10 - 1,000 Red Dias each)
-      const { data: dailyData } = await supabase
-        .from('tournament_scores')
-        .select('*')
-        .order('score', { ascending: false })
-        .limit(10);
+      // DAILY
+      const { data: dailyData, error: dailyError } =
+        await supabase
+          .from('tournament_scores')
+          .select('*')
+          .order('score', { ascending: false })
+          .limit(10);
+
+      if (dailyError) {
+        console.error(
+          'Daily leaderboard error:',
+          dailyError
+        );
+      }
 
       if (dailyData) {
-        const formatted = dailyData.map((item: any, idx: number) => ({
-          rank: idx + 1,
-          name: item.username || 'Player',
-          points: item.score?.toString() || '0',
-          prize: '1,000 Red Dias 🔴',
-        }));
+        const formatted: LeaderboardItem[] =
+          dailyData.map((item: any, index: number) => ({
+            rank: index + 1,
+            name: item.username || 'Player',
+            points: item.score?.toString() || '0',
+            prize: '1,000 Red Dias 🔴',
+          }));
+
         setDailyLeaderboard(formatted);
-        if (activeTab === 'daily') distributeAutomaticPrizes(formatted, 1000);
+
+        if (activeTab === 'daily') {
+          distributeAutomaticPrizes(formatted, 1000);
+        }
       }
 
-      // 2. Night (Top 15 - 1,500 Red Dias each)
-      const { data: nightData } = await supabase
-        .from('night_tournament_scores')
-        .select('*')
-        .order('score', { ascending: false })
-        .limit(15);
+      // NIGHT
+      const { data: nightData, error: nightError } =
+        await supabase
+          .from('night_tournament_scores')
+          .select('*')
+          .order('score', { ascending: false })
+          .limit(15);
+
+      if (nightError) {
+        console.error(
+          'Night leaderboard error:',
+          nightError
+        );
+      }
 
       if (nightData) {
-        const formatted = nightData.map((item: any, idx: number) => ({
-          rank: idx + 1,
-          name: item.username || 'Player',
-          points: item.score?.toString() || '0',
-          prize: '1,500 Red Dias 🔴',
-        }));
+        const formatted: LeaderboardItem[] =
+          nightData.map((item: any, index: number) => ({
+            rank: index + 1,
+            name: item.username || 'Player',
+            points: item.score?.toString() || '0',
+            prize: '1,500 Red Dias 🔴',
+          }));
+
         setNightLeaderboard(formatted);
-        if (activeTab === 'night') distributeAutomaticPrizes(formatted, 1500);
+
+        if (activeTab === 'night') {
+          distributeAutomaticPrizes(formatted, 1500);
+        }
       }
 
-      // 3. Mega Showdown (Top 20 - 2,500 Red Dias each)
-      const { data: megaData } = await supabase
-        .from('mega_tournament_scores')
-        .select('*')
-        .order('score', { ascending: false })
-        .limit(20);
+      // MEGA
+      const { data: megaData, error: megaError } =
+        await supabase
+          .from('mega_tournament_scores')
+          .select('*')
+          .order('score', { ascending: false })
+          .limit(20);
+
+      if (megaError) {
+        console.error(
+          'Mega leaderboard error:',
+          megaError
+        );
+      }
 
       if (megaData) {
-        const formatted = megaData.map((item: any, idx: number) => ({
-          rank: idx + 1,
-          name: item.username || 'Player',
-          points: item.score?.toString() || '0',
-          prize: '2,500 Red Dias 🔴',
-        }));
+        const formatted: LeaderboardItem[] =
+          megaData.map((item: any, index: number) => ({
+            rank: index + 1,
+            name: item.username || 'Player',
+            points: item.score?.toString() || '0',
+            prize: '2,500 Red Dias 🔴',
+          }));
+
         setMegaLeaderboard(formatted);
-        if (activeTab === 'mega') distributeAutomaticPrizes(formatted, 2500);
+
+        if (activeTab === 'mega') {
+          distributeAutomaticPrizes(formatted, 2500);
+        }
       }
-
-    } catch (err) {
-      console.error('Error fetching leaderboard:', err);
+    } catch (error) {
+      console.error(
+        'Error fetching leaderboard:',
+        error
+      );
     }
-  };
+  }, [
+    activeTab,
+    distributeAutomaticPrizes,
+  ]);
 
+  // Fetch leaderboard and refresh every 30 seconds
   useEffect(() => {
     fetchRankingsFromSupabase();
-    const interval = setInterval(fetchRankingsFromSupabase, 30000);
-    return () => clearInterval(interval);
-  }, [activeTab]);
 
-  // Update User Rank View
+    const interval = setInterval(() => {
+      fetchRankingsFromSupabase();
+    }, 30000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [fetchRankingsFromSupabase]);
+
+  // Update current user rank
   useEffect(() => {
-    const list = 
-      activeTab === 'daily' ? dailyLeaderboard : 
-      activeTab === 'night' ? nightLeaderboard : megaLeaderboard;
+    const list =
+      activeTab === 'daily'
+        ? dailyLeaderboard
+        : activeTab === 'night'
+        ? nightLeaderboard
+        : megaLeaderboard;
 
-    const myIndex = list.findIndex((item: any) => item.name === currentUserName);
-    const prizeText = 
-      activeTab === 'daily' ? '1,000 Red Dias' : 
-      activeTab === 'night' ? '1,500 Red Dias' : '2,500 Red Dias';
+    const myIndex = list.findIndex(
+      (item) => item.name === currentUserName
+    );
+
+    const prizeText =
+      activeTab === 'daily'
+        ? '1,000 Red Dias'
+        : activeTab === 'night'
+        ? '1,500 Red Dias'
+        : '2,500 Red Dias';
 
     if (myIndex !== -1) {
       setUserRankData({
@@ -155,29 +274,48 @@ export default function RankPage() {
         points: '0',
       });
     }
-  }, [activeTab, dailyLeaderboard, nightLeaderboard, megaLeaderboard, currentUserName]);
+  }, [
+    activeTab,
+    dailyLeaderboard,
+    nightLeaderboard,
+    megaLeaderboard,
+    currentUserName,
+  ]);
 
-  const displayedList = 
-    activeTab === 'daily' ? dailyLeaderboard : 
-    activeTab === 'night' ? nightLeaderboard : megaLeaderboard;
+  const displayedList =
+    activeTab === 'daily'
+      ? dailyLeaderboard
+      : activeTab === 'night'
+      ? nightLeaderboard
+      : megaLeaderboard;
 
   return (
     <div className="min-h-screen bg-[#0B0F19] text-white flex flex-col items-center pb-32 px-4 pt-6 select-none relative">
       <h1 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-pink-500 to-yellow-400 drop-shadow-[0_0_15px_rgba(236,72,153,0.6)]">
-        LEADERBOARD & RESULTS
+        LEADERBOARD &amp; RESULTS
       </h1>
-      <p className="text-xs text-gray-400 mb-2">Check out top rankings & tournament results 🏆</p>
-      
-      {/* GLOWING NEON BANNER FOR RESULT TIMINGS */}
+
+      <p className="text-xs text-gray-400 mb-2">
+        Check out top rankings &amp; tournament results 🏆
+      </p>
+
+      {/* RESULT TIMINGS */}
       <div className="w-full max-w-md bg-gradient-to-r from-purple-950/80 via-gray-900 to-cyan-950/80 border-2 border-cyan-400/60 p-3 rounded-2xl mb-4 shadow-[0_0_20px_rgba(6,182,212,0.3)] text-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-pink-500/10 animate-pulse pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 to-pink-500/10 animate-pulse pointer-events-none" />
+
         <p className="text-[11px] text-cyan-300 font-black uppercase tracking-wider mb-1 flex items-center justify-center gap-1">
           ⚡ RESULT SCHEDULE (नतिजा प्रकाशन समय) ⚡
         </p>
+
         <p className="text-[10px] text-yellow-300 font-bold leading-relaxed">
-          {activeTab === 'daily' && '☀️ Daily Tournament: खेल बिहान ६:०० देखि साँझ ६:०० सम्म | नतिजा: हरेक दिन बेलुका ७:०० बजे बोर्डमा आउनेछ।'}
-          {activeTab === 'night' && '🌙 Night Tournament: राती चल्नेछ | नतिजा: भोलीपल्ट बिहान १०:०० बजे बोर्डमा प्रकाशित हुनेछ।'}
-          {activeTab === 'mega' && '⚡ Mega Showdown: बिहान ६:०० देखि साँझ ६:०० सम्म | नतिजा: हरेक दिन बेलुका ७:०० बजे (Top 20) प्रकाशित हुनेछ।'}
+          {activeTab === 'daily' &&
+            '☀️ Daily Tournament: खेल बिहान ६:०० देखि साँझ ६:०० सम्म | नतिजा: हरेक दिन बेलुका ७:०० बजे बोर्डमा आउनेछ।'}
+
+          {activeTab === 'night' &&
+            '🌙 Night Tournament: राती चल्नेछ | नतिजा: भोलीपल्ट बिहान १०:०० बजे बोर्डमा प्रकाशित हुनेछ।'}
+
+          {activeTab === 'mega' &&
+            '⚡ Mega Showdown: बिहान ६:०० देखि साँझ ६:०० सम्म | नतिजा: हरेक दिन बेलुका ७:०० बजे (Top 20) प्रकाशित हुनेछ।'}
         </p>
       </div>
 
@@ -193,6 +331,7 @@ export default function RankPage() {
         >
           ☀️ Daily (Top 10)
         </button>
+
         <button
           onClick={() => setActiveTab('night')}
           className={`flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer ${
@@ -203,6 +342,7 @@ export default function RankPage() {
         >
           🌙 Night (Top 15)
         </button>
+
         <button
           onClick={() => setActiveTab('mega')}
           className={`flex-1 py-2.5 rounded-xl text-[11px] font-black uppercase transition-all cursor-pointer ${
@@ -215,21 +355,30 @@ export default function RankPage() {
         </button>
       </div>
 
-      {/* Leaderboard List / Skeletons */}
+      {/* LEADERBOARD */}
       <div className="w-full max-w-md flex flex-col gap-2.5 mb-4">
         {displayedList.length === 0 ? (
           <div className="w-full bg-gray-900/60 border border-purple-500/30 rounded-2xl p-8 text-center flex flex-col items-center justify-center gap-2 shadow-xl">
-            <span className="text-3xl animate-bounce">🏆</span>
+            <span className="text-3xl animate-bounce">
+              🏆
+            </span>
+
             <p className="text-xs text-yellow-300 font-black">
               Waiting for {activeTab.toUpperCase()} Tournament Results!
             </p>
+
             <p className="text-[10px] text-gray-400">
-              {activeTab === 'night' ? 'Results will appear sharply at 10:00 AM.' : 'Results will appear sharply at 7:00 PM.'} Play now to secure your rank!
+              {activeTab === 'night'
+                ? 'Results will appear sharply at 10:00 AM.'
+                : 'Results will appear sharply at 7:00 PM.'}{' '}
+              Play now to secure your rank!
             </p>
           </div>
         ) : (
-          displayedList.map((item: any) => {
-            const isMe = item.name === currentUserName;
+          displayedList.map((item) => {
+            const isMe =
+              item.name === currentUserName;
+
             return (
               <div
                 key={item.rank}
@@ -242,35 +391,53 @@ export default function RankPage() {
                 <div className="flex items-center gap-3">
                   <span
                     className={`w-7 h-7 flex items-center justify-center rounded-xl text-xs font-black shadow-md ${
-                      item.rank === 1 ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(234,179,8,0.8)]' :
-                      item.rank === 2 ? 'bg-gray-300 text-black' :
-                      item.rank === 3 ? 'bg-amber-600 text-white' :
-                      isMe ? 'bg-yellow-500 text-black' : 'bg-purple-900/80 text-cyan-300 border border-purple-500/40'
+                      item.rank === 1
+                        ? 'bg-yellow-400 text-black shadow-[0_0_10px_rgba(234,179,8,0.8)]'
+                        : item.rank === 2
+                        ? 'bg-gray-300 text-black'
+                        : item.rank === 3
+                        ? 'bg-amber-600 text-white'
+                        : isMe
+                        ? 'bg-yellow-500 text-black'
+                        : 'bg-purple-900/80 text-cyan-300 border border-purple-500/40'
                     }`}
                   >
                     #{item.rank}
                   </span>
+
                   <div>
                     <p className="text-xs font-bold flex items-center gap-1.5">
-                      <span className={isMe ? 'text-yellow-300 font-black text-sm' : 'text-white'}>
+                      <span
+                        className={
+                          isMe
+                            ? 'text-yellow-300 font-black text-sm'
+                            : 'text-white'
+                        }
+                      >
                         {item.name}
                       </span>
+
                       {isMe && (
                         <span className="bg-yellow-400 text-black text-[9px] px-1.5 py-0.5 rounded-md font-black shadow">
                           YOU
                         </span>
                       )}
                     </p>
+
                     <p className="text-[10px] text-yellow-400 font-bold">
                       Prize: {item.prize}
                     </p>
                   </div>
                 </div>
+
                 <div className="text-right">
                   <p className="text-xs font-black text-cyan-400">
                     {item.points} PTS
                   </p>
-                  <p className="text-[9px] text-gray-500 uppercase">Score</p>
+
+                  <p className="text-[9px] text-gray-500 uppercase">
+                    Score
+                  </p>
                 </div>
               </div>
             );
@@ -278,20 +445,23 @@ export default function RankPage() {
         )}
       </div>
 
-      {/* Sticky Bottom "Your Rank" Bar */}
+      {/* YOUR RANK */}
       <div className="fixed bottom-16 left-0 right-0 px-4 flex justify-center z-30">
         <div className="w-full max-w-md bg-gradient-to-r from-gray-950 via-gray-900 to-purple-950 border-2 border-yellow-400 p-3.5 rounded-2xl shadow-[0_0_25px_rgba(234,179,8,0.3)] flex items-center justify-between backdrop-blur-md">
           <div className="flex items-center gap-3">
             <span className="w-8 h-8 flex items-center justify-center bg-yellow-400 text-black rounded-xl text-xs font-black shadow-lg">
               {userRankData.rank}
             </span>
+
             <div>
               <p className="text-xs font-black text-yellow-400 flex items-center gap-1.5">
                 YOUR RANK ({activeTab.toUpperCase()})
+
                 <span className="bg-yellow-400 text-black text-[9px] px-1.5 py-0.5 rounded font-black">
                   YOU
                 </span>
               </p>
+
               <p className="text-[10px] text-gray-300 font-semibold">
                 Prize:{' '}
                 <span className="text-yellow-300 font-bold">
@@ -300,11 +470,15 @@ export default function RankPage() {
               </p>
             </div>
           </div>
+
           <div className="text-right">
             <p className="text-xs font-black text-cyan-400">
               {userRankData.points} PTS
             </p>
-            <p className="text-[9px] text-gray-400">SCORE</p>
+
+            <p className="text-[9px] text-gray-400">
+              SCORE
+            </p>
           </div>
         </div>
       </div>
