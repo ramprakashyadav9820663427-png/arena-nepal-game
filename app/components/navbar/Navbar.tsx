@@ -124,7 +124,7 @@ export default function Navbar({
                 : 'text-gray-300 hover:text-white'
             }`}
           >
-            {t.esports}
+            {t.sports}
           </button>
 
           <button
