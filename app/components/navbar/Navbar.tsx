@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { UserWallet, TabType } from '../../types/game';
 import AuthModal from '../AuthModal'; 
-import { translations } from '../../lib/translations';
+import { translations } from '@/lib/translations';
 import { supabase } from '@/lib/supabase';
 
 interface NavbarProps {
