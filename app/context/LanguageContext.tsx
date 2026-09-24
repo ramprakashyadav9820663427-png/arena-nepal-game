@@ -1,54 +1,115 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { translations } from '@/lib/translations';
-
-type Language = 'en' | 'ne';
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import { translations, Language, Translation } from '@/lib/Translations';
+type TranslationFunction = {
+  (key: string): string;
+} & Translation;
 
 interface LanguageContextType {
   currentLang: Language;
   setLanguage: (lang: Language) => void;
-  t: any;
+  t: TranslationFunction;
 }
 
-const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
+const LanguageContext = createContext<LanguageContextType | undefined>(
+  undefined
+);
 
-export function LanguageProvider({ children }: { children: React.ReactNode }) {
+export function LanguageProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const [currentLang, setCurrentLang] = useState<Language>('en');
 
   useEffect(() => {
-    const savedLang = localStorage.getItem('arena_lang') as Language;
-    if (savedLang && (savedLang === 'en' || savedLang === 'ne')) {
-      setCurrentLang(savedLang);
+    try {
+      const savedLang = localStorage.getItem('arena_lang');
+
+      if (savedLang === 'en' || savedLang === 'ne') {
+        setCurrentLang(savedLang);
+      }
+    } catch (error) {
+      console.error('Failed to load saved language:', error);
     }
   }, []);
 
   const setLanguage = (lang: Language) => {
     setCurrentLang(lang);
-    localStorage.setItem('arena_lang', lang);
+
+    try {
+      localStorage.setItem('arena_lang', lang);
+    } catch (error) {
+      console.error('Failed to save language:', error);
+    }
   };
 
-  // Helper translation function that supports both t.key and t('key')
-  const translationsObj = translations[currentLang] || translations.en;
-  
-  const t = (key: string) => {
-    return (translationsObj as any)[key] || (translations.en as any)[key] || key;
-  };
+  const t = useMemo<TranslationFunction>(() => {
+    const selectedTranslations =
+      translations[currentLang] || translations.en;
 
-  // Attach properties to function so t.appTitle also works if used anywhere
-  Object.assign(t, translationsObj);
+    const translate = ((key: string): string => {
+      const selectedValue = selectedTranslations[
+        key as keyof Translation
+      ];
+
+      if (
+        typeof selectedValue === 'string' &&
+        selectedValue.length > 0
+      ) {
+        return selectedValue;
+      }
+
+      const fallbackValue = translations.en[
+        key as keyof Translation
+      ];
+
+      if (
+        typeof fallbackValue === 'string' &&
+        fallbackValue.length > 0
+      ) {
+        return fallbackValue;
+      }
+
+      return key;
+    }) as TranslationFunction;
+
+    Object.assign(translate, selectedTranslations);
+
+    return translate;
+  }, [currentLang]);
+
+  const contextValue = useMemo<LanguageContextType>(
+    () => ({
+      currentLang,
+      setLanguage,
+      t,
+    }),
+    [currentLang, t]
+  );
 
   return (
-    <LanguageContext.Provider value={{ currentLang, setLanguage, t }}>
+    <LanguageContext.Provider value={contextValue}>
       {children}
     </LanguageContext.Provider>
   );
 }
 
-export function useLanguage() {
+export function useLanguage(): LanguageContextType {
   const context = useContext(LanguageContext);
+
   if (!context) {
-    throw new Error('useLanguage must be used within a LanguageProvider');
+    throw new Error(
+      'useLanguage must be used inside a LanguageProvider'
+    );
   }
+
   return context;
 }

@@ -1,226 +1,801 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
+
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+} from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useLanguage } from '../context/LanguageContext';
+import {
+  getWalletBalance,
+  updateGlobalBalance,
+} from '@/lib/wallet';
 
 const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
 const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-type TournamentType = 'NONE' | 'DAILY' | 'NIGHT' | 'MEGA';
+type TournamentType = 'NONE' | 'DAY' | 'WEEK' | 'MEGA';
+type DbTournamentType = 'day' | 'week' | 'mega';
+
+type TournamentRecord = {
+  id: string;
+  title: string;
+  type: DbTournamentType;
+  start_time: string | null;
+  end_time: string | null;
+  status: string;
+  entry_fee: number | null;
+  prize_pool: number | null;
+  reward_distribution: unknown;
+  game_key: string | null;
+};
+
+type GameObstacle = {
+  x: number;
+  y: number;
+  size: number;
+  speed: number;
+};
+
+const TYPE_MAP: Record<TournamentType, DbTournamentType | null> = {
+  NONE: null,
+  DAY: 'day',
+  WEEK: 'week',
+  MEGA: 'mega',
+};
+
+const FALLBACK_FEES: Record<DbTournamentType, number> = {
+  day: 200,
+  week: 300,
+  mega: 500,
+};
+
+const FALLBACK_TIERS: Record<DbTournamentType, number[]> = {
+  day: [1500, 1400, 1300, 1200, 1000, 900, 800, 700, 650, 550],
+  week: [7000, 5000, 3500, 2500, 2000, 1500, 1200, 1000, 800, 500],
+  mega: [15000, 7000, 6000, 5000, 4000, 3200, 2800, 2500, 2300, 2200],
+};
+
+const GAME_DURATION_SECONDS = 300;
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    return String((error as { message: unknown }).message);
+  }
+
+  return 'Something went wrong. Please try again.';
+}
+
+function formatMoney(value: number | null | undefined): string {
+  return Number(value ?? 0).toLocaleString('en-IN');
+}
+
+function formatTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function getTournamentLabel(type: TournamentType): string {
+  if (type === 'DAY') return 'DAILY TOURNAMENT';
+  if (type === 'WEEK') return 'WEEKLY TOURNAMENT';
+  if (type === 'MEGA') return 'MEGA SHOWDOWN';
+  return 'TOURNAMENT';
+}
+
+function getTournamentWindow(type: TournamentType): string {
+  if (type === 'DAY') return 'Daily: 6:00 AM – 6:00 PM NPT';
+  if (type === 'WEEK') return 'Every Friday: 6:00 AM – 6:00 PM NPT';
+  if (type === 'MEGA') return 'Every ~10 days: 6:00 AM – 6:00 PM NPT';
+  return '';
+}
+
+function getFirstPrize(
+  record: TournamentRecord | undefined,
+  dbType: DbTournamentType
+): number {
+  const dist = record?.reward_distribution;
+
+  if (Array.isArray(dist) && dist.length > 0 && typeof dist[0] === 'number') {
+    return dist[0];
+  }
+
+  return FALLBACK_TIERS[dbType][0];
+}
+
+function isRecordOpen(tournament: TournamentRecord): boolean {
+  const now = Date.now();
+
+  if (tournament.status !== 'active') return false;
+
+  if (
+    tournament.start_time &&
+    new Date(tournament.start_time).getTime() > now
+  ) {
+    return false;
+  }
+
+  if (
+    tournament.end_time &&
+    new Date(tournament.end_time).getTime() <= now
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+// Pick the most relevant row for a given type:
+// 1) the one currently open, else
+// 2) the nearest upcoming one, else
+// 3) the most recent past one.
+function pickTournamentRecord(
+  records: TournamentRecord[],
+  dbType: DbTournamentType
+): TournamentRecord | undefined {
+  const matches = records.filter((item) => item.type === dbType);
+  if (matches.length === 0) return undefined;
+
+  const now = Date.now();
+
+  const open = matches.find((item) => isRecordOpen(item));
+  if (open) return open;
+
+  const upcoming = matches
+    .filter(
+      (item) =>
+        item.start_time &&
+        new Date(item.start_time).getTime() > now
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.start_time as string).getTime() -
+        new Date(b.start_time as string).getTime()
+    )[0];
+
+  if (upcoming) return upcoming;
+
+  return matches
+    .slice()
+    .sort(
+      (a, b) =>
+        new Date(b.start_time ?? 0).getTime() -
+        new Date(a.start_time ?? 0).getTime()
+    )[0];
+}
 
 export default function TournamentSection() {
   const { t } = useLanguage();
-  const [redDiamonds, setRedDiamonds] = useState(150);
-  const [activeTournament, setActiveTournament] = useState<TournamentType>('NONE');
 
-  // Lobby vs Actual Game Flow state
+  const [redDiamonds, setRedDiamonds] = useState(0);
+  const [activeTournament, setActiveTournament] =
+    useState<TournamentType>('NONE');
+
+  const [tournaments, setTournaments] = useState<TournamentRecord[]>([]);
+  const [loadingTournaments, setLoadingTournaments] = useState(true);
+  const [loadingAction, setLoadingAction] = useState(false);
+
   const [inLobby, setInLobby] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
 
-  // Tournament Game State (15 Minutes Timer)
-  const [timeLeft, setTimeLeft] = useState(900); // 15 Minutes (900 seconds)
-  const [score, setScore] = useState(0); // Cumulative Total Score
+  const [timeLeft, setTimeLeft] = useState(GAME_DURATION_SECONDS);
+  const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
-  const [isDayLocked, setIsDayLocked] = useState(false);
-  const [isNightLocked, setIsNightLocked] = useState(false);
-  const [isMegaLocked, setIsMegaLocked] = useState(false);
+
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] =
+    useState<'error' | 'success' | ''>('');
+
+  const [playerName, setPlayerName] = useState('Player');
+  const [playerUid, setPlayerUid] = useState('');
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const requestRef = useRef<number>(0);
-
-  // Audio Context Ref for Web Audio API Sound Effects
   const audioCtxRef = useRef<AudioContext | null>(null);
 
-  // Original Game Refs (Obstacle Dodge for ALL tournaments)
-  const playerRef = useRef({ x: 175, y: 350, size: 20 });
-  const obstaclesRef = useRef<{ x: number; y: number; size: number; speed: number }[]>([]);
+  const playerRef = useRef({ x: 150, y: 350, size: 20 });
+  const obstaclesRef = useRef<GameObstacle[]>([]);
 
-  // Load Red Diamonds & Check Time Windows on mount
-  useEffect(() => {
-    try {
-      const red = localStorage.getItem('arena_red_diamonds') || localStorage.getItem('arena_diamond') || localStorage.getItem('arena_cash');
-      if (red) setRedDiamonds(parseInt(red, 10));
-    } catch (e) {
-      console.error(e);
-    }
+  const scoreRef = useRef(0);
+  const timeLeftRef = useRef(GAME_DURATION_SECONDS);
+  const activeTournamentRef = useRef<TournamentType>('NONE');
+  const gameStartedRef = useRef(false);
+  const gameOverRef = useRef(false);
+  const submittingRef = useRef(false);
 
-    const checkTimeWindows = () => {
-      const currentHour = new Date().getHours();
-      const currentMinute = new Date().getMinutes();
-      const totalMins = currentHour * 60 + currentMinute;
+  const activeRecord = pickTournamentRecord(
+    tournaments,
+    TYPE_MAP[activeTournament] as DbTournamentType
+  );
 
-      // Daily: 6:00 AM (360) to 6:00 PM (1080)
-      if (totalMins < 360 || totalMins >= 1080) {
-        setIsDayLocked(true);
-      } else {
-        setIsDayLocked(false);
-      }
+  const showMessage = useCallback(
+    (text: string, type: 'error' | 'success' = 'error') => {
+      setMessage(text);
+      setMessageType(type);
+    },
+    []
+  );
 
-      // Night: 7:30 PM (1170) to 6:00 AM (360) next day
-      if (totalMins >= 1170 || totalMins < 360) {
-        setIsNightLocked(false);
-      } else {
-        setIsNightLocked(true);
-      }
-
-      // Mega Showdown: Open 24/7
-      setIsMegaLocked(false);
-    };
-
-    checkTimeWindows();
-    const interval = setInterval(checkTimeWindows, 30000);
-    return () => clearInterval(interval);
+  const clearMessage = useCallback(() => {
+    setMessage('');
+    setMessageType('');
   }, []);
 
-  // Web Audio Sound Generator
-  const playSound = (type: 'score' | 'gameover') => {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') ctx.resume();
+  /*
+   * GLOBAL BALANCE SYNC
+   *
+   * TournamentSection must use the same wallet balance source
+   * as the rest of the app.
+   *
+   * Profile data is still read for player information, but
+   * Red Diamonds are taken from getWalletBalance().
+   */
+  const loadProfile = useCallback(async () => {
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser();
 
-      const osc = ctx.createOscillator();
+    if (authError) throw authError;
+
+    if (!user) {
+      setRedDiamonds(0);
+      setPlayerName('Player');
+      setPlayerUid('');
+      return null;
+    }
+
+    /*
+     * Read player/profile information.
+     * Balance is intentionally NOT taken from this query.
+     */
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('nickname, gaming_nickname, full_name')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (error) throw error;
+
+    /*
+     * IMPORTANT:
+     * Read the balance from the shared/global wallet source.
+     * This keeps TournamentSection synchronized with Wallet,
+     * Home and the other game sections.
+     */
+    const globalBalance = await getWalletBalance();
+    const red = Number(globalBalance ?? 0);
+
+    setRedDiamonds(red);
+
+    if (profile) {
+      const name =
+        profile.nickname ||
+        profile.gaming_nickname ||
+        profile.full_name ||
+        user.email ||
+        'Player';
+
+      setPlayerName(name);
+    } else {
+      setPlayerName(user.email || 'Player');
+    }
+
+    setPlayerUid(user.id);
+
+    return red;
+  }, []);
+
+  const loadTournaments = useCallback(async () => {
+    setLoadingTournaments(true);
+
+    try {
+      const { data, error } = await supabase
+        .from('tournaments')
+        .select(
+          'id, title, type, start_time, end_time, status, entry_fee, prize_pool, reward_distribution, game_key'
+        )
+        .in('type', ['day', 'week', 'mega'])
+        .order('start_time', { ascending: false })
+        .limit(30);
+
+      if (error) throw error;
+
+      setTournaments((data || []) as TournamentRecord[]);
+    } catch (error) {
+      showMessage(`Could not load tournaments: ${getErrorMessage(error)}`);
+    } finally {
+      setLoadingTournaments(false);
+    }
+  }, [showMessage]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const initialize = async () => {
+      try {
+        await Promise.all([loadProfile(), loadTournaments()]);
+      } catch (error) {
+        if (mounted) showMessage(getErrorMessage(error));
+      }
+    };
+
+    void initialize();
+
+    /*
+     * Listen for wallet changes from the rest of the app.
+     *
+     * IMPORTANT:
+     * We only READ the new global balance here.
+     * We do not call updateGlobalBalance() from this listener,
+     * preventing a wallet-update loop.
+     */
+    const handleStorage = () => {
+      void loadProfile().catch((error) => {
+        showMessage(getErrorMessage(error));
+      });
+    };
+
+    const handleWalletUpdated = () => {
+      void loadProfile().catch((error) => {
+        showMessage(getErrorMessage(error));
+      });
+    };
+
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('walletUpdated', handleWalletUpdated);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('walletUpdated', handleWalletUpdated);
+    };
+  }, [loadProfile, loadTournaments, showMessage]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void loadTournaments();
+    }, 60000);
+
+    return () => window.clearInterval(interval);
+  }, [loadTournaments]);
+
+  const playSound = useCallback((type: 'score' | 'gameover') => {
+    try {
+      if (typeof window === 'undefined') return;
+
+      if (!audioCtxRef.current) {
+        const AudioContextClass =
+          window.AudioContext ||
+          (
+            window as typeof window & {
+              webkitAudioContext?: typeof AudioContext;
+            }
+          ).webkitAudioContext;
+
+        if (!AudioContextClass) return;
+        audioCtxRef.current = new AudioContextClass();
+      }
+
+      const ctx = audioCtxRef.current;
+
+      if (ctx.state === 'suspended') void ctx.resume();
+
+      const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.connect(gain);
+
+      oscillator.connect(gain);
       gain.connect(ctx.destination);
 
       const now = ctx.currentTime;
 
       if (type === 'score') {
-        osc.type = 'triangle';
-        osc.frequency.setValueAtTime(587.33, now);
-        osc.frequency.setValueAtTime(880, now + 0.08);
+        oscillator.type = 'triangle';
+        oscillator.frequency.setValueAtTime(587.33, now);
+        oscillator.frequency.setValueAtTime(880, now + 0.08);
         gain.gain.setValueAtTime(0.2, now);
         gain.gain.linearRampToValueAtTime(0.01, now + 0.2);
-        osc.start(now);
-        osc.stop(now + 0.2);
-      } else if (type === 'gameover') {
-        osc.type = 'sawtooth';
-        osc.frequency.setValueAtTime(200, now);
-        osc.frequency.linearRampToValueAtTime(60, now + 0.4);
+        oscillator.start(now);
+        oscillator.stop(now + 0.2);
+      } else {
+        oscillator.type = 'sawtooth';
+        oscillator.frequency.setValueAtTime(200, now);
+        oscillator.frequency.linearRampToValueAtTime(60, now + 0.4);
         gain.gain.setValueAtTime(0.3, now);
         gain.gain.linearRampToValueAtTime(0.01, now + 0.4);
-        osc.start(now);
-        osc.stop(now + 0.4);
+        oscillator.start(now);
+        oscillator.stop(now + 0.4);
       }
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error('Audio error:', error);
     }
-  };
+  }, []);
 
-  // Main 15-Minute Tournament Countdown Timer
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (gameStarted && !gameOver && timeLeft > 0) {
-      timer = setInterval(() => {
-        setTimeLeft((prev) => {
-          if (prev <= 1) {
-            setGameOver(true);
-            saveScoreToSupabase(score);
-            playSound('gameover');
-            return 0;
+  const submitScore = useCallback(
+    async (finalScore: number, finalDistance: number) => {
+      if (submittingRef.current) return;
+
+      submittingRef.current = true;
+      setLoadingAction(true);
+      clearMessage();
+
+      try {
+        const { data: sessionData, error: sessionError } =
+          await supabase.auth.getSession();
+
+        if (sessionError) throw sessionError;
+
+        if (!sessionData.session?.user) {
+          throw new Error('Please login again to submit your score.');
+        }
+
+        const tournamentId = activeRecord?.id;
+
+        if (!tournamentId) {
+          throw new Error('Tournament record not found.');
+        }
+
+        const { data, error } = await supabase.rpc(
+          'submit_tournament_attempt',
+          {
+            p_tournament_id: tournamentId,
+            p_score: Math.max(0, Math.floor(finalScore)),
+            p_distance: Math.max(0, finalDistance),
+            p_remaining_lives: 0,
           }
-          return prev - 1;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(timer);
-  }, [gameStarted, gameOver, timeLeft, score]);
+        );
 
-  // Handle Join Click
-  const handleJoinClick = (type: TournamentType) => {
-    if (type === 'DAILY' && isDayLocked) {
-      alert('❌ Daily Tournament is locked! Opens daily from 6:00 AM to 6:00 PM.');
-      return;
-    }
-    if (type === 'NIGHT' && isNightLocked) {
-      alert('❌ Night Tournament is locked! Opens daily from 7:30 PM to 6:00 AM.');
-      return;
-    }
-    if (type === 'MEGA' && isMegaLocked) {
-      alert('❌ Mega Showdown is currently locked.');
+        if (error) throw error;
+
+        if (
+          data &&
+          typeof data === 'object' &&
+          'success' in data &&
+          (data as { success?: boolean }).success === false
+        ) {
+          throw new Error('Score submission was not accepted.');
+        }
+
+        setGameStarted(false);
+        gameStartedRef.current = false;
+        setGameOver(true);
+        gameOverRef.current = true;
+        setInLobby(false);
+
+        showMessage(
+          'Your score was submitted successfully.',
+          'success'
+        );
+
+        /*
+         * Refresh the shared balance after the tournament
+         * server has finished processing the attempt.
+         */
+        const freshBalance = await loadProfile();
+
+        if (freshBalance !== null) {
+          updateGlobalBalance(freshBalance);
+        }
+
+        await loadTournaments();
+      } catch (error) {
+        showMessage(`Score submission failed: ${getErrorMessage(error)}`);
+      } finally {
+        setLoadingAction(false);
+      }
+    },
+    [
+      activeRecord,
+      clearMessage,
+      loadProfile,
+      loadTournaments,
+      showMessage,
+    ]
+  );
+
+  const finishGame = useCallback(
+    async (finalScore: number) => {
+      if (gameOverRef.current || submittingRef.current) return;
+
+      gameOverRef.current = true;
+      gameStartedRef.current = false;
+
+      setGameStarted(false);
+      setGameOver(true);
+
+      playSound('gameover');
+
+      await submitScore(finalScore, Math.max(0, finalScore));
+    },
+    [playSound, submitScore]
+  );
+
+  const handleJoinClick = useCallback(
+    async (type: TournamentType) => {
+      clearMessage();
+
+      if (type === 'NONE') return;
+
+      const dbType = TYPE_MAP[type] as DbTournamentType;
+      const record = pickTournamentRecord(tournaments, dbType);
+
+      if (!record) {
+        showMessage(`${getTournamentLabel(type)} is not configured yet.`);
+        return;
+      }
+
+      if (!isRecordOpen(record)) {
+        showMessage(
+          `${getTournamentLabel(type)} is currently closed. Check its schedule.`
+        );
+        return;
+      }
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+
+      if (authError || !user) {
+        showMessage('Please login before joining a tournament.');
+        return;
+      }
+
+      setLoadingAction(true);
+
+      try {
+        // UI safeguard only; database uniqueness is still required.
+        const { data: existing, error: existingError } = await supabase
+          .from('tournament_participants')
+          .select('id, status')
+          .eq('tournament_id', record.id)
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+        if (existingError) throw existingError;
+
+        if (existing) {
+          showMessage(
+            existing.status === 'completed' || existing.status === 'started'
+              ? 'You have already used your attempt for this tournament.'
+              : 'You have already joined this tournament. Contact support if you cannot continue.'
+          );
+          return;
+        }
+
+        const fee = Number(
+          record.entry_fee ?? FALLBACK_FEES[record.type]
+        );
+
+        /*
+         * IMPORTANT:
+         * Read the latest global balance immediately before
+         * checking the tournament entry fee.
+         *
+         * This prevents a stale TournamentSection state from
+         * being used when Wallet was changed elsewhere.
+         */
+        const latestGlobalBalance = Number(
+          (await getWalletBalance()) ?? 0
+        );
+
+        setRedDiamonds(latestGlobalBalance);
+
+        if (latestGlobalBalance < fee) {
+          showMessage(
+            `Not enough Red Diamonds. You need ${fee} Red Diamonds.`
+          );
+          return;
+        }
+
+        const { data, error } = await supabase.rpc(
+          'join_tournament',
+          { p_tournament_id: record.id }
+        );
+
+        if (error) throw error;
+
+        if (
+          data &&
+          typeof data === 'object' &&
+          'success' in data &&
+          (data as { success?: boolean }).success === false
+        ) {
+          throw new Error('Tournament join was not accepted.');
+        }
+
+        setActiveTournament(type);
+        activeTournamentRef.current = type;
+
+        setInLobby(true);
+        setGameStarted(false);
+        gameStartedRef.current = false;
+
+        setGameOver(false);
+        gameOverRef.current = false;
+
+        setScore(0);
+        scoreRef.current = 0;
+
+        setTimeLeft(GAME_DURATION_SECONDS);
+        timeLeftRef.current = GAME_DURATION_SECONDS;
+
+        submittingRef.current = false;
+
+        /*
+         * Entry fee was deducted server-side.
+         * Read the fresh global wallet balance and broadcast it
+         * so Wallet/Home/other sections remain synchronized.
+         */
+        const freshBalance = await loadProfile();
+
+        if (freshBalance !== null) {
+          updateGlobalBalance(freshBalance);
+        }
+      } catch (error) {
+        showMessage(getErrorMessage(error));
+
+        await loadProfile().catch(() => undefined);
+      } finally {
+        setLoadingAction(false);
+      }
+    },
+    [
+      clearMessage,
+      loadProfile,
+      showMessage,
+      tournaments,
+    ]
+  );
+
+  const startTourneyGamePlay = useCallback(async () => {
+    clearMessage();
+
+    const dbType = TYPE_MAP[activeTournament] as DbTournamentType;
+    const record = pickTournamentRecord(tournaments, dbType);
+
+    if (!record) {
+      showMessage('Tournament record not found.');
       return;
     }
 
-    const fee = type === 'DAILY' ? 100 : type === 'NIGHT' ? 200 : 500;
-    if (redDiamonds < fee) {
-      alert(`❌ Not enough Red Diamonds! You need ${fee} Red Diamonds to join.`);
+    if (!isRecordOpen(record)) {
+      showMessage('This tournament has ended or is not open yet.');
       return;
     }
 
-    setActiveTournament(type);
-    setInLobby(true);
+    setLoadingAction(true);
+
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+
+      if (sessionError) throw sessionError;
+
+      if (!sessionData.session?.user) {
+        throw new Error('Please login before starting.');
+      }
+
+      const { data, error } = await supabase.rpc(
+        'start_tournament_attempt',
+        { p_tournament_id: record.id }
+      );
+
+      if (error) throw error;
+
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        !('success' in data) ||
+        !(data as { success?: boolean }).success
+      ) {
+        throw new Error('Could not start tournament attempt.');
+      }
+
+      setInLobby(false);
+      setGameStarted(true);
+      gameStartedRef.current = true;
+
+      setGameOver(false);
+      gameOverRef.current = false;
+
+      setScore(0);
+      scoreRef.current = 0;
+
+      setTimeLeft(GAME_DURATION_SECONDS);
+      timeLeftRef.current = GAME_DURATION_SECONDS;
+
+      playerRef.current = { x: 150, y: 350, size: 20 };
+      obstaclesRef.current = [];
+
+      submittingRef.current = false;
+    } catch (error) {
+      showMessage(getErrorMessage(error));
+    } finally {
+      setLoadingAction(false);
+    }
+  }, [activeTournament, clearMessage, showMessage, tournaments]);
+
+  const exitToTournaments = useCallback(() => {
     setGameStarted(false);
-  };
-
-  // Start Actual Gameplay
-  const startTourneyGamePlay = () => {
-    const fee = activeTournament === 'DAILY' ? 100 : activeTournament === 'NIGHT' ? 200 : 500;
-    if (redDiamonds < fee) {
-      alert(`❌ Not enough Red Diamonds!`);
-      return;
-    }
-
-    const remaining = redDiamonds - fee;
-    setRedDiamonds(remaining);
-    
-    localStorage.setItem('arena_red_diamonds', remaining.toString());
-    localStorage.setItem('arena_red_dias', remaining.toString());
-    localStorage.setItem('arena_diamond', remaining.toString());
-    localStorage.setItem('arena_cash', remaining.toString());
-    
-    window.dispatchEvent(new Event('storage'));
+    gameStartedRef.current = false;
 
     setInLobby(false);
-    setGameStarted(true);
+
+    setGameOver(false);
+    gameOverRef.current = false;
+
+    setActiveTournament('NONE');
+    activeTournamentRef.current = 'NONE';
+
     setScore(0);
-    setTimeLeft(900); // 15 Mins
-    setGameOver(false);
+    scoreRef.current = 0;
 
-    playerRef.current = { x: 175, y: 350, size: 20 };
-    obstaclesRef.current = [];
-  };
+    setTimeLeft(GAME_DURATION_SECONDS);
+    timeLeftRef.current = GAME_DURATION_SECONDS;
 
-  // Handle Restart / Continue Game on Death (Preserves Score)
-  const handleRestartGame = () => {
-    setGameOver(false);
-    playerRef.current = { x: 175, y: 350, size: 20 };
-    obstaclesRef.current = [];
-  };
+    clearMessage();
 
-  // Save Score to Supabase
-  const saveScoreToSupabase = async (finalScore: number) => {
-    try {
-      const username = localStorage.getItem('arena_username') || 'Player';
-      const tableName = activeTournament === 'DAILY' ? 'tournament_scores' : activeTournament === 'NIGHT' ? 'night_tournament_scores' : 'mega_tournament_scores';
-      
-      const { error } = await supabase.from(tableName).insert([
-        { user_id: 'player_local_user', username: username, score: finalScore }
-      ]);
-      if (error) console.error('Supabase Error:', error.message);
-      else console.log(`${activeTournament} cumulative score saved successfully:`, finalScore);
-    } catch (err) {
-      console.error('Error saving score:', err);
-    }
-  };
+    /*
+     * Refresh the global balance when returning to the
+     * tournament list so the displayed amount is current.
+     */
+    void loadProfile().catch((error) => {
+      showMessage(getErrorMessage(error));
+    });
+  }, [clearMessage, loadProfile, showMessage]);
 
-  // Main Canvas Game Loop
+  useEffect(() => {
+    if (!gameStarted || gameOver) return;
+
+    const timer = window.setInterval(() => {
+      setTimeLeft((previous) => {
+        const next = Math.max(0, previous - 1);
+        timeLeftRef.current = next;
+
+        if (next <= 0) {
+          window.setTimeout(() => {
+            void finishGame(scoreRef.current);
+          }, 0);
+        }
+
+        return next;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [gameStarted, gameOver, finishGame]);
+
   useEffect(() => {
     if (!gameStarted || gameOver) return;
 
     const canvas = canvasRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const updateGame = () => {
+    let animationId = 0;
+    let lastFrameTime = 0;
+
+    const updateGame = (timestamp: number) => {
+      if (!gameStartedRef.current || gameOverRef.current) return;
+
+      if (!lastFrameTime) lastFrameTime = timestamp;
+
+      const delta = Math.min((timestamp - lastFrameTime) / 16.67, 2);
+      lastFrameTime = timestamp;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       ctx.strokeStyle = 'rgba(0, 255, 255, 0.08)';
       ctx.lineWidth = 1;
+
       for (let i = 0; i < canvas.width; i += 30) {
         ctx.beginPath();
         ctx.moveTo(i, 0);
@@ -228,128 +803,323 @@ export default function TournamentSection() {
         ctx.stroke();
       }
 
-      const speedMultiplier = activeTournament === 'MEGA' ? 1.5 : activeTournament === 'NIGHT' ? 1.2 : 1.0;
-      const spawnChance = activeTournament === 'MEGA' ? 0.04 : 0.03;
+      const currentTournament = activeTournamentRef.current;
 
-      if (Math.random() < spawnChance) {
+      const speedMultiplier =
+        currentTournament === 'MEGA'
+          ? 1.5
+          : currentTournament === 'WEEK'
+            ? 1.2
+            : 1;
+
+      const spawnChance =
+        currentTournament === 'MEGA' ? 0.04 : 0.03;
+
+      if (Math.random() < spawnChance * delta) {
         obstaclesRef.current.push({
-          x: Math.random() * (canvas.width - 20),
-          y: -20,
+          x: Math.random() * (canvas.width - 24),
+          y: -24,
           size: 16 + Math.random() * 8,
           speed: 2.2 * speedMultiplier,
         });
       }
 
-      ctx.fillStyle = activeTournament === 'MEGA' ? '#ff3300' : '#ff0055';
-      obstaclesRef.current.forEach((obs, index) => {
-        obs.y += obs.speed;
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = activeTournament === 'MEGA' ? '#ff3300' : '#ff0055';
-        ctx.fillRect(obs.x, obs.y, obs.size, obs.size);
+      ctx.fillStyle =
+        currentTournament === 'MEGA' ? '#ff3300' : '#ff0055';
 
-        const p = playerRef.current;
-        if (
-          p.x < obs.x + obs.size &&
-          p.x + p.size > obs.x &&
-          p.y < obs.y + obs.size &&
-          p.y + p.size > obs.y
-        ) {
-          setGameOver(true);
-          playSound('gameover');
-          saveScoreToSupabase(score);
+      ctx.shadowBlur = 8;
+      ctx.shadowColor =
+        currentTournament === 'MEGA' ? '#ff3300' : '#ff0055';
+
+      const player = playerRef.current;
+
+      for (
+        let index = obstaclesRef.current.length - 1;
+        index >= 0;
+        index--
+      ) {
+        const obstacle = obstaclesRef.current[index];
+
+        obstacle.y += obstacle.speed * delta;
+
+        ctx.fillRect(
+          obstacle.x,
+          obstacle.y,
+          obstacle.size,
+          obstacle.size
+        );
+
+        const collision =
+          player.x < obstacle.x + obstacle.size &&
+          player.x + player.size > obstacle.x &&
+          player.y < obstacle.y + obstacle.size &&
+          player.y + player.size > obstacle.y;
+
+        if (collision) {
+          void finishGame(scoreRef.current);
+          return;
         }
 
-        if (obs.y > canvas.height) {
+        if (obstacle.y > canvas.height) {
           obstaclesRef.current.splice(index, 1);
-          setScore((s) => s + (activeTournament === 'MEGA' ? 20 : 10));
+
+          const points = currentTournament === 'MEGA' ? 20 : 10;
+
+          scoreRef.current += points;
+          setScore(scoreRef.current);
+
           playSound('score');
         }
-      });
+      }
 
       ctx.shadowBlur = 0;
-      const p = playerRef.current;
-      ctx.fillStyle = activeTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
+
+      ctx.fillStyle =
+        currentTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
+
       ctx.shadowBlur = 12;
-      ctx.shadowColor = activeTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
-      ctx.fillRect(p.x, p.y, p.size, p.size);
+      ctx.shadowColor =
+        currentTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
+
+      ctx.fillRect(
+        player.x,
+        player.y,
+        player.size,
+        player.size
+      );
+
       ctx.shadowBlur = 0;
 
-      requestRef.current = requestAnimationFrame(updateGame);
+      animationId = window.requestAnimationFrame(updateGame);
+      requestRef.current = animationId;
     };
 
-    requestRef.current = requestAnimationFrame(updateGame);
-    return () => cancelAnimationFrame(requestRef.current);
-  }, [gameStarted, gameOver, score, activeTournament]);
+    animationId = window.requestAnimationFrame(updateGame);
+    requestRef.current = animationId;
+
+    return () => {
+      window.cancelAnimationFrame(animationId);
+    };
+  }, [gameStarted, gameOver, playSound, finishGame]);
+
+  useEffect(() => {
+    return () => {
+      window.cancelAnimationFrame(requestRef.current);
+    };
+  }, []);
 
   const handleInteraction = (
-    e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>
+    event:
+      | React.MouseEvent<HTMLCanvasElement>
+      | React.TouchEvent<HTMLCanvasElement>
   ) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !gameStartedRef.current) return;
+
     const rect = canvas.getBoundingClientRect();
-    const clientX = 'touches' in e ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
-    const x = clientX - rect.left;
-    if (x >= 0 && x <= canvas.width - playerRef.current.size) {
-      playerRef.current.x = x;
-    }
+
+    const clientX =
+      'touches' in event
+        ? event.touches[0]?.clientX
+        : event.clientX;
+
+    if (clientX === undefined) return;
+
+    const scaleX = canvas.width / rect.width;
+    const x = (clientX - rect.left) * scaleX;
+
+    playerRef.current.x = Math.max(
+      0,
+      Math.min(canvas.width - playerRef.current.size, x)
+    );
+  };
+
+  const renderTournamentCard = (
+    type: TournamentType,
+    icon: string,
+    color: string
+  ) => {
+    const dbType = TYPE_MAP[type] as DbTournamentType;
+    const record = pickTournamentRecord(tournaments, dbType);
+
+    const open = record ? isRecordOpen(record) : false;
+
+    const fee = record
+      ? Number(record.entry_fee ?? FALLBACK_FEES[dbType])
+      : FALLBACK_FEES[dbType];
+
+    const firstPrize = getFirstPrize(record, dbType);
+
+    return (
+      <div
+        key={type}
+        className={`bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border ${color} rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden`}
+      >
+        <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none" />
+
+        <div className="flex justify-between items-center gap-2">
+          <span className="text-xs font-black text-yellow-400 uppercase tracking-wider">
+            {icon} {getTournamentLabel(type)} (5 MINS)
+          </span>
+
+          <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black whitespace-nowrap">
+            {formatMoney(fee)} Red Dias 🔴
+          </span>
+        </div>
+
+        <p className="text-xs text-yellow-300 font-bold leading-relaxed">
+          {record
+            ? `Total Prize Pool: ${formatMoney(record.prize_pool)} Red Diamonds`
+            : 'Tournament schedule is not configured.'}
+          {' | '}
+          <span className="text-white font-black">
+            Top 10 win — 1st: {formatMoney(firstPrize)} Red Dias
+          </span>
+        </p>
+
+        <p className="text-[11px] text-gray-400">
+          {getTournamentWindow(type)}
+        </p>
+
+        {record && (
+          <p className="text-[10px] text-gray-500 break-all">
+            {record.title} · {record.status}
+          </p>
+        )}
+
+        {!record || !open ? (
+          <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
+            🔒 {record ? 'Tournament Closed' : 'Not Configured'}
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={loadingAction || loadingTournaments}
+            onClick={() => void handleJoinClick(type)}
+            className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider disabled:opacity-50"
+          >
+            {loadingAction
+              ? 'PLEASE WAIT...'
+              : `🚀 JOIN ${getTournamentLabel(type)} (${fee} Dias)`}
+          </button>
+        )}
+      </div>
+    );
   };
 
   return (
     <div className="w-full flex flex-col items-center select-none pb-10">
+      {message && (
+        <div
+          role="status"
+          className={`w-full max-w-md mb-3 p-3 rounded-xl border text-xs font-bold ${
+            messageType === 'success'
+              ? 'bg-green-950/60 border-green-500/40 text-green-300'
+              : 'bg-red-950/60 border-red-500/40 text-red-300'
+          }`}
+        >
+          {message}
+        </div>
+      )}
+
       {inLobby ? (
         <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-5 flex flex-col items-center shadow-2xl relative text-center">
           <h2 className="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400 uppercase mb-3">
-            ⚠️ {activeTournament === 'DAILY' ? 'DAILY TOURNAMENT LOBBY' : activeTournament === 'NIGHT' ? 'NIGHT TOURNAMENT LOBBY' : 'MEGA TOURNAMENT LOBBY'} (15 MINS)
+            {getTournamentLabel(activeTournament)} LOBBY (5 MINS)
           </h2>
 
           <div className="bg-black/60 p-4 rounded-2xl border border-red-500/40 mb-5 text-left">
-            <p className="text-xs text-red-400 font-bold mb-1">महत्वपूर्ण चेतावनी (Important Warning):</p>
+            <p className="text-xs text-red-400 font-bold mb-1">
+              Important Warning
+            </p>
+
             <p className="text-[11px] text-gray-300 leading-relaxed font-medium">
-              &quot;एक पटक खेल (Game) सुरु भइसकेपछि कृपया बीचमा नछाड्नुहोला वा बाहिर नजानुहोला। यदि तपाईंले खेल बीचैमा काट्नुभयो भने फेरि खेल्न पाइने छैन।&quot;
+              Your attempt is recorded by the tournament server.
+              Once the match starts, you cannot restart or resume it.
             </p>
           </div>
 
           <button
-            onClick={startTourneyGamePlay}
-            className="w-full py-3 bg-gradient-to-r from-cyan-400 to-pink-500 text-black font-black text-xs rounded-2xl shadow-lg active:scale-95 transition-all cursor-pointer"
+            type="button"
+            disabled={loadingAction}
+            onClick={() => void startTourneyGamePlay()}
+            className="w-full py-3 bg-gradient-to-r from-cyan-400 to-pink-500 text-black font-black text-xs rounded-2xl shadow-lg active:scale-95 transition-all cursor-pointer disabled:opacity-50"
           >
-            ▶️ {t.playNow || "START MATCH"} (खेल सुरु गर्नुहोस्)
+            {loadingAction
+              ? 'STARTING...'
+              : `▶️ ${t.playNow || 'START MATCH'} (5 MINUTES)`}
+          </button>
+
+          <button
+            type="button"
+            onClick={exitToTournaments}
+            className="w-full mt-2 py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl"
+          >
+            {t.back || 'Back to Tournaments'}
           </button>
         </div>
-      ) : gameStarted ? (
+      ) : gameStarted || gameOver ? (
         <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-4 flex flex-col items-center shadow-2xl relative">
           <div className="w-full flex justify-between items-center mb-3 bg-black/60 px-3 py-2 rounded-2xl border border-gray-800">
-            <span className="text-xs font-black text-yellow-400">⏱️ {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}</span>
-            <span className="text-xs font-black text-cyan-300">Total Score: {score}</span>
+            <span className="text-xs font-black text-yellow-400">
+              ⏱️ {formatTime(timeLeft)}
+            </span>
+
+            <span className="text-xs font-black text-cyan-300">
+              Total Score: {score}
+            </span>
           </div>
 
-          <div className="relative w-[320px] h-[420px] bg-black rounded-2xl border border-cyan-500/30 overflow-hidden flex flex-col items-center justify-center">
+          <div className="relative w-full max-w-[320px] h-[420px] bg-black rounded-2xl border border-cyan-500/30 overflow-hidden flex flex-col items-center justify-center">
             {gameOver && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md z-10 p-4 text-center gap-2">
                 <h2 className="text-base font-black text-red-500 uppercase">
-                  {timeLeft <= 0 ? 'Tournament Time Up!' : 'Ouch! Out!'}
+                  {timeLeft <= 0
+                    ? 'Tournament Time Up!'
+                    : 'Match Over'}
                 </h2>
-                <p className="text-xs text-gray-300">Cumulative Score: <span className="text-cyan-400 font-bold">{score}</span></p>
 
-                <div className="flex flex-col gap-2 w-full mt-1">
-                  {timeLeft > 0 && (
-                    <button
-                      onClick={handleRestartGame}
-                      className="w-full py-2.5 bg-gradient-to-r from-green-400 to-cyan-500 text-black font-black text-xs rounded-xl shadow active:scale-95 transition-all cursor-pointer"
-                    >
-                      🔄 CONTINUE PLAYING (Resume Score)
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      setGameStarted(false);
-                      setActiveTournament('NONE');
-                    }}
-                    className="w-full py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer"
-                  >
-                    {t.back || "Exit to Tournaments"}
-                  </button>
-                </div>
+                <p className="text-xs text-gray-300">
+                  Player:{' '}
+                  <span className="text-white font-bold">
+                    {playerName}
+                  </span>
+                </p>
+
+                <p className="text-xs text-gray-300">
+                  UID:{' '}
+                  <span className="text-cyan-300 font-bold">
+                    {playerUid || '—'}
+                  </span>
+                </p>
+
+                <p className="text-xs text-gray-300">
+                  Cumulative Score:{' '}
+                  <span className="text-cyan-400 font-bold">
+                    {score}
+                  </span>
+                </p>
+
+                {loadingAction && (
+                  <p className="text-xs text-yellow-300">
+                    Submitting your score...
+                  </p>
+                )}
+
+                {!loadingAction && messageType === 'error' && (
+                  <p className="text-xs text-red-300">
+                    Score submission needs attention. Do not start another match.
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  disabled={loadingAction}
+                  onClick={exitToTournaments}
+                  className="w-full py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
+                >
+                  {t.back || 'Exit to Tournaments'}
+                </button>
               </div>
             )}
 
@@ -359,110 +1129,51 @@ export default function TournamentSection() {
               height={420}
               onMouseMove={handleInteraction}
               onTouchMove={handleInteraction}
-              className="cursor-crosshair touch-none"
+              className="w-full h-full cursor-crosshair touch-none"
             />
           </div>
         </div>
       ) : (
         <div className="w-full max-w-md flex flex-col gap-4">
           <div className="flex justify-between items-center bg-gray-900/90 border border-purple-500/30 px-4 py-2.5 rounded-2xl">
-            <span className="text-xs font-bold text-gray-300">Your Red Diamonds:</span>
-            <span className="text-xs font-black text-red-400">{redDiamonds} 🔴</span>
+            <span className="text-xs font-bold text-gray-300">
+              Your Red Diamonds:
+            </span>
+
+            <span className="text-xs font-black text-red-400">
+              {formatMoney(redDiamonds)} 🔴
+            </span>
           </div>
 
           <h2 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
-            {t.tournament || "ACTIVE TOURNAMENTS"}
+            {t.tournament || 'ACTIVE TOURNAMENTS'}
           </h2>
 
-          {/* 1. DAILY TOURNAMENT CARD (Attractive Mega Style) */}
-          <div className="bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border border-yellow-500/50 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none"></div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1">
-                ☀️ DAILY TOURNAMENT (15 MINS)
-              </span>
-              <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black">
-                100 Red Dias 🔴
-              </span>
+          {loadingTournaments ? (
+            <div className="text-center text-sm text-gray-400 py-8">
+              Loading tournaments...
             </div>
-            
-            <p className="text-xs text-yellow-300 font-bold leading-relaxed">
-              Total Prize Pool: <span className="text-white font-black">10,000 Red Diamonds</span> | Top 10 players win <span className="text-white font-black">1,000 Red Diamonds each</span>! 🏆🔥
-            </p>
+          ) : (
+            <>
+              {renderTournamentCard(
+                'DAY',
+                '☀️',
+                'border-yellow-500/50'
+              )}
 
-            {isDayLocked ? (
-              <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
-                🔒 Locked (Opens Daily 6:00 AM - 6:00 PM)
-              </div>
-            ) : (
-              <button
-                onClick={() => handleJoinClick('DAILY')}
-                className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-              >
-                🚀 JOIN DAILY TOURNAMENT (100 Dias)
-              </button>
-            )}
-          </div>
+              {renderTournamentCard(
+                'WEEK',
+                '📅',
+                'border-blue-500/50'
+              )}
 
-          {/* 2. NIGHT TOURNAMENT CARD (Attractive Mega Style) */}
-          <div className="bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border border-yellow-500/50 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none"></div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1">
-                🌙 NIGHT TOURNAMENT (15 MINS)
-              </span>
-              <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black">
-                200 Red Dias 🔴
-              </span>
-            </div>
-            
-            <p className="text-xs text-yellow-300 font-bold leading-relaxed">
-              Total Prize Pool: <span className="text-white font-black">22,500 Red Diamonds</span> | Top 15 players win <span className="text-white font-black">1,500 Red Diamonds each</span>! 🏆🔥
-            </p>
-
-            {isNightLocked ? (
-              <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
-                🔒 Locked (Opens Daily 7:30 PM - 6:00 AM)
-              </div>
-            ) : (
-              <button
-                onClick={() => handleJoinClick('NIGHT')}
-                className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-              >
-                🚀 JOIN NIGHT TOURNAMENT (200 Dias)
-              </button>
-            )}
-          </div>
-
-          {/* 3. MEGA SHOWDOWN CARD */}
-          <div className="bg-gradient-to-br from-gray-900 via-purple-950/40 to-gray-900 border border-yellow-500/50 rounded-3xl p-4 flex flex-col gap-3 shadow-2xl relative overflow-hidden">
-            <div className="absolute -right-8 -top-8 bg-yellow-500/15 w-24 h-24 rounded-full blur-xl pointer-events-none"></div>
-            <div className="flex justify-between items-center">
-              <span className="text-xs font-black text-yellow-400 uppercase tracking-wider flex items-center gap-1">
-                ⚡ MEGA SHOWDOWN (15 MINS)
-              </span>
-              <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black animate-pulse">
-                500 Red Dias 🔴
-              </span>
-            </div>
-            
-            <p className="text-xs text-yellow-300 font-bold leading-relaxed">
-              Total Prize Pool: <span className="text-white font-black">50,000 Red Diamonds</span> | Top 20 players win <span className="text-white font-black">2,500 Red Diamonds each</span>! 🏆🔥
-            </p>
-
-            {isMegaLocked ? (
-              <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
-                🔒 Locked
-              </div>
-            ) : (
-              <button
-                onClick={() => handleJoinClick('MEGA')}
-                className="w-full py-3 bg-gradient-to-r from-yellow-400 via-pink-500 to-cyan-400 text-black font-black text-xs rounded-2xl shadow-xl active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
-              >
-                🚀 JOIN MEGA TOURNAMENT (500 Dias)
-              </button>
-            )}
-          </div>
+              {renderTournamentCard(
+                'MEGA',
+                '⚡',
+                'border-pink-500/50'
+              )}
+            </>
+          )}
         </div>
       )}
     </div>

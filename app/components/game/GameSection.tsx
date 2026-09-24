@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
-import { updateWalletBalance } from '@/lib/wallet'; // ✅ सेंट्रल 1:1 वॉलेट सिंक
+import { supabase } from '@/lib/supabase';
 
 interface UserWallet {
   [key: string]: any;
@@ -38,6 +38,12 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
   const magnetTimerRef = useRef<number>(0);
   const moveDirectionRef = useRef<'LEFT' | 'RIGHT' | null>(null);
 
+  // Always keep latest diamonds for game-over sync (avoids stale closure)
+  const diamondsRef = useRef<number>(0);
+  useEffect(() => {
+    diamondsRef.current = diamonds;
+  }, [diamonds]);
+
   useEffect(() => {
     setIsMounted(true);
   }, []);
@@ -49,13 +55,13 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
       const ctx = new AudioContext();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      
+
       osc.type = 'triangle';
       osc.frequency.setValueAtTime(300, ctx.currentTime);
       osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.04);
       gain.gain.setValueAtTime(0.2, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.04);
-      
+
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start();
@@ -107,15 +113,74 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
     return () => clearInterval(timer);
   }, []);
 
-  // ✅ 1:1 सटीक वॉलेट सिंक (White Diamond के लिए updateWalletBalance का इस्तेमाल)
-  const addToWallet = (earnedDiamonds: number) => {
+  /**
+   * White Diamonds ONLY — add (never deduct).
+   * 1) localStorage
+   * 2) walletUpdated event → Lobby header + Wallet update instantly
+   * 3) Supabase profiles.white_diamonds → survives refresh
+   */
+  const addToWallet = async (earnedDiamonds: number) => {
+    if (!earnedDiamonds || earnedDiamonds <= 0) return;
+
     try {
-      const currentWhite = localStorage.getItem('arena_white_diamonds');
-      const updated = (currentWhite ? parseInt(currentWhite, 10) : 24500) + earnedDiamonds;
-      localStorage.setItem('arena_white_diamonds', updated.toString());
-      window.dispatchEvent(new Event('storage'));
+      // Base = max(localStorage, Supabase) so we never wipe existing balance
+      let current = 0;
+      try {
+        const raw = localStorage.getItem('arena_white_diamonds');
+        if (raw !== null && raw !== '') {
+          const n = parseInt(raw, 10);
+          if (!isNaN(n)) current = n;
+        }
+      } catch {
+        // ignore
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (session?.user?.id) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('white_diamonds')
+          .eq('id', session.user.id)
+          .single();
+
+        const serverWhite = Number(profile?.white_diamonds) || 0;
+        current = Math.max(current, serverWhite);
+      }
+
+      const updated = current + earnedDiamonds;
+
+      // 1. localStorage
+      try {
+        localStorage.setItem('arena_white_diamonds', String(updated));
+      } catch {
+        // ignore
+      }
+
+      // 2. Live UI sync (Lobby header + WalletSection)
+      window.dispatchEvent(
+        new CustomEvent('walletUpdated', {
+          detail: {
+            whiteDiamonds: updated,
+          },
+        })
+      );
+
+      // 3. Persist to Supabase so refresh keeps the value
+      if (session?.user?.id) {
+        const { error } = await supabase
+          .from('profiles')
+          .update({ white_diamonds: updated })
+          .eq('id', session.user.id);
+
+        if (error) {
+          console.error('Failed to persist white_diamonds:', error);
+        }
+      }
     } catch (e) {
-      console.error('Wallet sync error', e);
+      console.error('White diamond sync error', e);
     }
   };
 
@@ -124,6 +189,7 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
     setGameState('PLAYING');
     setScore(0);
     setDiamonds(0);
+    diamondsRef.current = 0;
     setLayer(1);
     setTimeLeft(120);
     setIsDoubleRewarded(false);
@@ -136,7 +202,7 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
     moveDirectionRef.current = null;
   };
 
-  // ✅ AdSense / Double Diamonds Option (फिक्स किया हुआ ताकि सही से काम करे)
+  // Double Diamonds (ad) — only adds the extra difference
   const handleWatchAdToDouble = () => {
     checkAndUpdateCooldowns();
     if (doubleCooldown > 0) {
@@ -149,10 +215,12 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
     }
 
     if (!isDoubleRewarded) {
-      const doubled = Math.floor(diamonds * 2);
-      const diff = doubled - diamonds;
+      const current = diamondsRef.current;
+      const doubled = Math.floor(current * 2);
+      const diff = doubled - current;
       setDiamonds(doubled);
-      addToWallet(diff); // केवल एक्स्ट्रा अंतर जोड़ा जाएगा
+      diamondsRef.current = doubled;
+      addToWallet(diff);
       setIsDoubleRewarded(true);
 
       const cooldownEndTime = Date.now() + 900 * 1000; // 15 Minutes
@@ -163,7 +231,7 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
     }
   };
 
-  // ✅ Revive Option with AdSense support
+  // Revive
   const handleRevive = () => {
     checkAndUpdateCooldowns();
     if (reviveCooldown > 0) {
@@ -247,7 +315,7 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
       const spawnChance = layer === 1 ? baseSpawnChance * 0.7 : baseSpawnChance;
 
       if (Math.random() < spawnChance) {
-        const obstacleSpeed = 1.2 + (layer * 0.45);
+        const obstacleSpeed = 1.2 + layer * 0.45;
         obstaclesRef.current.push({
           x: Math.random() * (canvas.width - 25),
           y: -25,
@@ -256,7 +324,6 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
         });
       }
 
-      // ✅ डायमंड्स की वैल्यू को 1 कर दिया गया है ताकि 1 कमाने पर 1 ही बढ़े (1:1 ratio)
       if (Math.random() < 0.012) {
         collectibleDiamondsRef.current.push({
           x: Math.random() * (canvas.width - 20),
@@ -290,8 +357,11 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
           moveDirectionRef.current = null;
 
           setHasSyncedWallet((prevSynced: boolean) => {
-            if (!prevSynced && diamonds > 0) {
-              addToWallet(diamonds); // गेम ओवर पर 1:1 सटीक सिंक
+            if (!prevSynced) {
+              const earned = diamondsRef.current;
+              if (earned > 0) {
+                addToWallet(earned);
+              }
             }
             return true;
           });
@@ -353,7 +423,7 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
 
     requestRef.current = requestAnimationFrame(updateGame);
     return () => cancelAnimationFrame(requestRef.current);
-  }, [activeGame, gameState, layer, diamonds]);
+  }, [activeGame, gameState, layer]);
 
   if (!isMounted) return null;
 
@@ -400,7 +470,9 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
       </div>
 
       <div className="w-full flex justify-between items-center mb-3 bg-black/40 px-3 py-2 rounded-2xl border border-gray-800">
-        <span className="text-[10px] text-gray-400">Time: {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}</span>
+        <span className="text-[10px] text-gray-400">
+          Time: {Math.floor(timeLeft / 60)}:{String(timeLeft % 60).padStart(2, '0')}
+        </span>
         <div className="flex items-center gap-1.5 bg-purple-950/60 px-3 py-1 rounded-xl border border-purple-500/30">
           <span className="text-sm">💎</span>
           <span className="text-xs font-black text-cyan-300">{diamonds}</span>
@@ -422,7 +494,6 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
           </div>
         )}
 
-        {/* ✅ गेम ओवर स्क्रीन जिसमें एड्स (Double & Revive) वाले दोनों बटन मौजूद हैं */}
         {gameState === 'GAMEOVER' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 z-10 p-4 text-center gap-2">
             <h2 className="text-base font-black text-red-500 uppercase">Game Over!</h2>
@@ -468,19 +539,31 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
 
       <div className="w-full flex justify-between items-center gap-4 mt-3 px-2">
         <button
-          onMouseDown={() => { moveDirectionRef.current = 'LEFT'; playClickSound(); }}
-          onMouseUp={() => moveDirectionRef.current = null}
-          onTouchStart={() => { moveDirectionRef.current = 'LEFT'; playClickSound(); }}
-          onTouchEnd={() => moveDirectionRef.current = null}
+          onMouseDown={() => {
+            moveDirectionRef.current = 'LEFT';
+            playClickSound();
+          }}
+          onMouseUp={() => (moveDirectionRef.current = null)}
+          onTouchStart={() => {
+            moveDirectionRef.current = 'LEFT';
+            playClickSound();
+          }}
+          onTouchEnd={() => (moveDirectionRef.current = null)}
           className="flex-1 py-3.5 bg-purple-600 text-white font-black rounded-2xl cursor-pointer"
         >
           Left
         </button>
         <button
-          onMouseDown={() => { moveDirectionRef.current = 'RIGHT'; playClickSound(); }}
-          onMouseUp={() => moveDirectionRef.current = null}
-          onTouchStart={() => { moveDirectionRef.current = 'RIGHT'; playClickSound(); }}
-          onTouchEnd={() => moveDirectionRef.current = null}
+          onMouseDown={() => {
+            moveDirectionRef.current = 'RIGHT';
+            playClickSound();
+          }}
+          onMouseUp={() => (moveDirectionRef.current = null)}
+          onTouchStart={() => {
+            moveDirectionRef.current = 'RIGHT';
+            playClickSound();
+          }}
+          onTouchEnd={() => (moveDirectionRef.current = null)}
           className="flex-1 py-3.5 bg-indigo-600 text-white font-black rounded-2xl cursor-pointer"
         >
           Right

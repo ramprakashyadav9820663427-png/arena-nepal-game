@@ -1,6 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  getGlobalBalance,
+  updateGlobalBalance,
+} from '@/lib/wallet';
 
 /**
  * Arena Spinner Winner
@@ -54,40 +58,6 @@ const SPIN_MS = 10_000;
 const RESULT_HOLD_MS = 1_400;
 const SLICE_DEG = 360 / WHEEL_SLOTS.length;
 const WHEEL_START_ANGLE = 0; // first slice center is at 12 o'clock
-
-const WALLET_KEY = 'arena_red_diamonds';
-const LEGACY_WALLET_KEY = 'arena_wallet_balance';
-const WALLET_EVENT = 'walletUpdated';
-
-function readWalletBalance(): number {
-  if (typeof window === 'undefined') return 0;
-
-  try {
-    const raw =
-      window.localStorage.getItem(WALLET_KEY) ??
-      window.localStorage.getItem(LEGACY_WALLET_KEY);
-
-    const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeWalletBalance(next: number) {
-  if (typeof window === 'undefined') return;
-
-  const safe = Math.max(0, Math.floor(next));
-
-  try {
-    window.localStorage.setItem(WALLET_KEY, String(safe));
-    window.dispatchEvent(
-      new CustomEvent(WALLET_EVENT, { detail: safe }),
-    );
-  } catch {
-    // The UI can continue even if storage is unavailable.
-  }
-}
 
 function totalBets(bets: Bets): number {
   return Object.values(bets).reduce((sum, value) => sum + value, 0);
@@ -297,8 +267,9 @@ export default function ArenaSpinnerWinner() {
     [initAudio],
   );
 
+  // ========== GLOBAL BALANCE SYNC ==========
   const syncBalance = useCallback(() => {
-    const next = readWalletBalance();
+    const next = getGlobalBalance();
     balanceRef.current = next;
     setRedBalance(next);
   }, []);
@@ -339,7 +310,7 @@ export default function ArenaSpinnerWinner() {
       const nextBalance = balanceAfterBet + totalReturn;
 
       if (winningBet > 0) {
-        writeWalletBalance(nextBalance);
+        updateGlobalBalance(nextBalance);
         balanceRef.current = nextBalance;
         setRedBalance(nextBalance);
         setLastResult(
@@ -383,9 +354,9 @@ export default function ArenaSpinnerWinner() {
     if (stake > startingBalance) {
       betsRef.current = {};
       setBets({});
-      writeWalletBalance(startingBalance);
+      updateGlobalBalance(startingBalance);
     } else if (stake > 0) {
-      writeWalletBalance(balanceAfterBet);
+      updateGlobalBalance(balanceAfterBet);
       balanceRef.current = balanceAfterBet;
       setRedBalance(balanceAfterBet);
     }
@@ -441,14 +412,31 @@ export default function ArenaSpinnerWinner() {
   useEffect(() => {
     syncBalance();
 
-    const onWalletUpdate = () => syncBalance();
+    const onWalletUpdate = (event: Event) => {
+      const custom = event as CustomEvent;
+      let next = getGlobalBalance();
+
+      if (custom?.detail) {
+        if (typeof custom.detail === 'number') {
+          next = custom.detail;
+        } else if (typeof custom.detail?.balance === 'number') {
+          next = custom.detail.balance;
+        } else if (typeof custom.detail?.redDiamonds === 'number') {
+          next = custom.detail.redDiamonds;
+        }
+      }
+
+      balanceRef.current = next;
+      setRedBalance(next);
+    };
+
     const onStorage = () => syncBalance();
 
-    window.addEventListener(WALLET_EVENT, onWalletUpdate);
+    window.addEventListener('walletUpdated', onWalletUpdate);
     window.addEventListener('storage', onStorage);
 
     return () => {
-      window.removeEventListener(WALLET_EVENT, onWalletUpdate);
+      window.removeEventListener('walletUpdated', onWalletUpdate);
       window.removeEventListener('storage', onStorage);
     };
   }, [syncBalance]);
