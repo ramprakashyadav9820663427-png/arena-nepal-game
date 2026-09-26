@@ -1,21 +1,25 @@
 {
-  "name": "Arena Nepal Admin",
-  "short_name": "AN Admin",
-  "description": "Admin Panel for Arena Nepal Gaming Platform",
-  "start_url": "/admin",
+  "name": "Arena Nepal",
+  "short_name": "Arena Nepal",
+  "description": "Play & win on Arena Nepal gaming platform",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0B0F19",
-  "theme_color": "#ec4899",
+  "orientation": "portrait",
+  "background_color": "#050508",
+  "theme_color": "#050508",
   "icons": [
     {
       "src": "/icon.png",
       "sizes": "192x192",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/icon.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     }
   ]
 }

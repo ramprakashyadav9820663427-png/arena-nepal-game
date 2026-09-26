@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { getGlobalBalance, getWalletBalance } from '@/lib/wallet';
+import { getGlobalBalance } from '@/lib/wallet';
+import SettingsSection from '@/components/SettingsSection';
 
 type WalletSectionProps = {
-  // Legacy props (still supported)
   wallet?: {
     redDiamonds?: number;
     whiteDiamonds?: number;
@@ -13,8 +13,6 @@ type WalletSectionProps = {
     [key: string]: any;
   };
   setWallet?: React.Dispatch<React.SetStateAction<any>> | any;
-
-  // New controlled props from page.tsx (preferred for global sync)
   redDiamonds?: number;
   whiteDiamonds?: number;
   winningCash?: number;
@@ -33,6 +31,9 @@ type HistoryItem = {
 };
 
 const SUPPORT_NUMBER = '9779716782200';
+
+const MIN_RED_TO_CASH = 500;
+const MIN_CASH_TO_RED = 500;
 
 const RED_PACKAGES = [
   { diamonds: 100, price: 100 },
@@ -92,7 +93,10 @@ export default function WalletSection({
   const [isFirstDeposit, setIsFirstDeposit] = useState(true);
 
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+
+  const [initialLoading, setInitialLoading] = useState(true);
+  const hasLoadedOnceRef = useRef(false);
+
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -100,9 +104,7 @@ export default function WalletSection({
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [showCashToRedModal, setShowCashToRedModal] = useState(false);
-  const [showSettingModal, setShowSettingModal] = useState(false);
-  const [settingTab, setSettingTab] =
-    useState<'support' | 'terms' | 'about'>('support');
+  const [showSettings, setShowSettings] = useState(false);
 
   const [inputName, setInputName] = useState('');
   const [inputMobile, setInputMobile] = useState('');
@@ -114,22 +116,23 @@ export default function WalletSection({
   const [withdrawAmount, setWithdrawAmount] = useState('500');
   const [withdrawQrImage, setWithdrawQrImage] = useState<File | null>(null);
 
-  const [exchangeAmount, setExchangeAmount] = useState('100');
-  const [cashToRedAmount, setCashToRedAmount] = useState('100');
+  const [exchangeAmount, setExchangeAmount] = useState(String(MIN_RED_TO_CASH));
+  const [cashToRedAmount, setCashToRedAmount] = useState(String(MIN_CASH_TO_RED));
+
+  const redToCashInFlightRef = useRef(false);
+  const cashToRedInFlightRef = useRef(false);
 
   const notify = (text: string) => {
     setMessage(text);
     window.setTimeout(() => setMessage(''), 5000);
   };
 
-  // Central helper: update local state + parent props + localStorage + broadcast event
   const applyBalances = useCallback(
     (red: number, white: number, cash: number) => {
       setRedDiamonds(red);
       setWhiteDiamonds(white);
       setWinningCash(cash);
 
-      // Legacy setWallet support
       if (setWallet) {
         setWallet((previous: any) => ({
           ...(previous || {}),
@@ -139,12 +142,10 @@ export default function WalletSection({
         }));
       }
 
-      // New controlled callback from page.tsx
       if (onBalanceUpdate) {
         onBalanceUpdate(red, white, cash);
       }
 
-      // Persist for games / other components that still read localStorage
       try {
         localStorage.setItem('arena_red_diamonds', red.toString());
         localStorage.setItem('arena_red_dias', red.toString());
@@ -156,14 +157,13 @@ export default function WalletSection({
         // ignore
       }
 
-      // Broadcast so Header + any other listeners stay in perfect sync
       window.dispatchEvent(
         new CustomEvent('walletUpdated', {
           detail: {
             redDiamonds: red,
             whiteDiamonds: white,
             winningCash: cash,
-            balance: red, // legacy single-value support
+            balance: red,
           },
         })
       );
@@ -171,21 +171,10 @@ export default function WalletSection({
     [setWallet, onBalanceUpdate]
   );
 
-  const syncRedBalance = useCallback(() => {
-    // Always prefer the global localStorage value (Single Source of Truth for games)
-    const balance = getGlobalBalance();
-    setRedDiamonds(balance);
-
-    if (setWallet) {
-      setWallet((previous: any) => ({
-        ...(previous || {}),
-        redDiamonds: balance,
-      }));
-    }
-  }, [setWallet]);
-
   const fetchUserData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedOnceRef.current) {
+      setInitialLoading(true);
+    }
 
     try {
       const {
@@ -231,14 +220,11 @@ export default function WalletSection({
           profile.mobile_number || profile.phone || 'No Mobile Added'
         );
 
-        // ★★★ IMPORTANT FIX ★★★
-        // Red Diamonds → always prefer localStorage (games update this)
-        // White Diamonds + Winning Cash → from Supabase
-        const localRed = getGlobalBalance();
+        const red = Number(profile.red_diamonds) || 0;
         const white = Number(profile.white_diamonds) || 0;
         const cash = Number(profile.winning_cash) || 0;
 
-        applyBalances(localRed, white, cash);
+        applyBalances(red, white, cash);
 
         setBonusTaken(Boolean(profile.bonus_taken));
         setTurnoverRequired(Number(profile.turnover_required) || 0);
@@ -252,7 +238,7 @@ export default function WalletSection({
             'New Player'
         );
         setGameUid(uid);
-        syncRedBalance();
+        applyBalances(getGlobalBalance(), 0, 0);
       }
 
       const { count, error: depositError } = await supabase
@@ -289,18 +275,17 @@ export default function WalletSection({
       console.error('Wallet fetch failed:', error);
       notify('Wallet information could not be loaded. Please refresh.');
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      hasLoadedOnceRef.current = true;
     }
-  }, [applyBalances, syncRedBalance]);
+  }, [applyBalances]);
 
-  // Prefer controlled props from page.tsx when they change
   useEffect(() => {
     if (typeof propRed === 'number') setRedDiamonds(propRed);
     if (typeof propWhite === 'number') setWhiteDiamonds(propWhite);
     if (typeof propCash === 'number') setWinningCash(propCash);
   }, [propRed, propWhite, propCash]);
 
-  // Also accept legacy wallet prop
   useEffect(() => {
     if (wallet) {
       if (typeof wallet.redDiamonds === 'number') setRedDiamonds(wallet.redDiamonds);
@@ -313,15 +298,12 @@ export default function WalletSection({
     let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
     let isMounted = true;
 
-    // Helper that ALWAYS chains .on() BEFORE .subscribe()
     const setupRealtime = (userId: string) => {
-      // Clean up any previous channel first
       if (realtimeChannel) {
         supabase.removeChannel(realtimeChannel);
         realtimeChannel = null;
       }
 
-      // Correct order: channel → on → subscribe
       realtimeChannel = supabase
         .channel(`wallet-profile:${userId}`)
         .on(
@@ -344,12 +326,11 @@ export default function WalletSection({
               turnover_completed?: number;
             };
 
-            // ★★★ Keep localStorage as source of truth for Red Diamonds ★★★
-            const localRed = getGlobalBalance();
+            const red = Number(row.red_diamonds) || 0;
             const white = Number(row.white_diamonds) || 0;
             const cash = Number(row.winning_cash) || 0;
 
-            applyBalances(localRed, white, cash);
+            applyBalances(red, white, cash);
 
             if (typeof row.bonus_taken === 'boolean') setBonusTaken(row.bonus_taken);
             if (typeof row.turnover_required === 'number') setTurnoverRequired(row.turnover_required);
@@ -387,9 +368,7 @@ export default function WalletSection({
           setRedDiamonds(balance);
         }
       } else {
-        // Only sync red from localStorage — DO NOT call fetchUserData here
-        // (fetchUserData would overwrite with old Supabase value)
-        syncRedBalance();
+        void fetchUserData();
       }
     };
 
@@ -422,7 +401,7 @@ export default function WalletSection({
         supabase.removeChannel(realtimeChannel);
       }
     };
-  }, [fetchUserData, applyBalances, syncRedBalance]);
+  }, [fetchUserData, applyBalances]);
 
   const copyText = async (text: string) => {
     try {
@@ -486,7 +465,6 @@ export default function WalletSection({
     }
   };
 
-  // DEPOSIT: submit request to Supabase, then open WhatsApp for payment details.
   const handleDeposit = async (diamonds: number, price: number) => {
     if (!userId) {
       notify('Please log in before requesting a deposit.');
@@ -516,7 +494,7 @@ Payment Method: ${depositMethod}
 Hello Team, I have created a deposit request in the app. Please share payment details / QR code so I can send the payment screenshot.`;
 
       window.open(
-        'https://wa.me/9779716782200?text=' +
+        'https://wa.me/' + SUPPORT_NUMBER + '?text=' +
           encodeURIComponent(messageText),
         '_blank'
       );
@@ -533,7 +511,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
     }
   };
 
-  // WHITE TO RED: exchange 200,000 White Diamonds for 100 Red Diamonds.
   const exchangeWhiteToRed = async () => {
     if (busy) return;
 
@@ -563,11 +540,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
       if (error) throw error;
 
-      const updatedWhiteDiamonds = whiteDiamonds - whiteCost;
-      const updatedRedDiamonds = redDiamonds + redReward;
-
-      applyBalances(updatedRedDiamonds, updatedWhiteDiamonds, winningCash);
-
       notify(
         'Successfully exchanged 200,000 White Diamonds for 100 Red Diamonds!'
       );
@@ -581,7 +553,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
     }
   };
 
-  // WITHDRAWAL: upload private QR image, then call secure database RPC.
   const submitWithdrawalRequest = async (
     event: React.FormEvent
   ) => {
@@ -700,7 +671,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
   };
 
   const exchangeRedToCash = async () => {
-    if (busy) return;
+    if (redToCashInFlightRef.current || busy) return;
 
     if (!userId) {
       notify('Please log in first.');
@@ -711,6 +682,13 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
     if (!Number.isFinite(amount) || amount <= 0) {
       notify('Enter a valid Red Diamond amount.');
+      return;
+    }
+
+    if (amount < MIN_RED_TO_CASH) {
+      notify(
+        `Minimum ${formatNumber(MIN_RED_TO_CASH)} Red Diamonds required to exchange for cash.`
+      );
       return;
     }
 
@@ -728,6 +706,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
       return;
     }
 
+    redToCashInFlightRef.current = true;
     setBusy(true);
 
     try {
@@ -742,18 +721,19 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         `Exchange successful! ${formatNumber(amount)} Red Diamonds exchanged for NPR ${formatNumber(netCash)} after the 5% company fee.`
       );
       setShowExchangeModal(false);
-      setExchangeAmount('100');
+      setExchangeAmount(String(MIN_RED_TO_CASH));
       await fetchUserData();
     } catch (error: any) {
       console.error('Red-to-cash exchange failed:', error);
       notify(error?.message || 'Red-to-cash exchange failed. Please try again.');
     } finally {
+      redToCashInFlightRef.current = false;
       setBusy(false);
     }
   };
 
   const exchangeCashToRed = async () => {
-    if (busy) return;
+    if (cashToRedInFlightRef.current || busy) return;
 
     if (!userId) {
       notify('Please log in first.');
@@ -767,11 +747,19 @@ Hello Team, I have created a deposit request in the app. Please share payment de
       return;
     }
 
+    if (amount < MIN_CASH_TO_RED) {
+      notify(
+        `Minimum NPR ${formatNumber(MIN_CASH_TO_RED)} required to exchange for Red Diamonds.`
+      );
+      return;
+    }
+
     if (amount > winningCash) {
       notify('Insufficient winning cash.');
       return;
     }
 
+    cashToRedInFlightRef.current = true;
     setBusy(true);
 
     try {
@@ -785,12 +773,13 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         `Successfully exchanged NPR ${formatNumber(amount)} into Red Diamonds.`
       );
       setShowCashToRedModal(false);
-      setCashToRedAmount('100');
+      setCashToRedAmount(String(MIN_CASH_TO_RED));
       await fetchUserData();
     } catch (error: any) {
       console.error('Cash-to-red exchange failed:', error);
       notify(error?.message || 'Cash-to-red exchange failed. Please try again.');
     } finally {
+      cashToRedInFlightRef.current = false;
       setBusy(false);
     }
   };
@@ -805,7 +794,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
       ? Math.min(100, Math.floor((turnoverCompleted / turnoverRequired) * 100))
       : 0;
 
-  if (loading) {
+  if (initialLoading) {
     return (
       <div className="flex w-full flex-col items-center justify-center gap-3 py-20">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-yellow-400 border-t-transparent" />
@@ -816,7 +805,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
   return (
     <div className="flex w-full flex-col gap-4 pb-6">
-      {/* Profile Header */}
+      {/* Profile Header + Settings */}
       <section className="rounded-2xl border border-yellow-500/30 bg-gradient-to-br from-gray-900 via-gray-950 to-black p-4 shadow-xl">
         <div className="mb-3 flex items-start justify-between">
           <div>
@@ -841,7 +830,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
               Edit Profile
             </button>
             <button
-              onClick={() => setShowSettingModal(true)}
+              onClick={() => setShowSettings(true)}
               className="rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1 text-[10px] font-bold text-gray-300"
             >
               ⚙️ Settings
@@ -849,7 +838,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
           </div>
         </div>
 
-        {/* Balance Cards */}
         <div className="grid grid-cols-3 gap-2">
           <div className="rounded-xl border border-green-500/30 bg-green-950/40 p-2 text-center">
             <p className="text-[9px] font-bold text-green-400">NPR CASH</p>
@@ -871,7 +859,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
           </div>
         </div>
 
-        {/* Quick Actions */}
         <div className="mt-3 grid grid-cols-3 gap-2">
           <button
             onClick={() => setShowWithdrawModal(true)}
@@ -894,7 +881,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       </section>
 
-      {/* Turnover Progress */}
       {bonusTaken && turnoverRequired > 0 && (
         <section className="rounded-xl border border-yellow-500/30 bg-yellow-950/20 p-3">
           <div className="mb-1 flex items-center justify-between text-[10px]">
@@ -918,7 +904,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex gap-1 overflow-x-auto rounded-xl bg-black/60 p-1">
         {(
           [
@@ -944,7 +929,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         ))}
       </div>
 
-      {/* Tab Content */}
       <>
         {activeTab === 'deposit' && (
           <div className="flex flex-col gap-3">
@@ -1299,10 +1283,10 @@ Hello Team, I have created a deposit request in the app. Please share payment de
             </p>
 
             <label className="block text-[10px] font-bold text-gray-400">
-              Red Diamonds to exchange
+              Red Diamonds to exchange (minimum {formatNumber(MIN_RED_TO_CASH)})
               <input
                 type="number"
-                min="1"
+                min={MIN_RED_TO_CASH}
                 value={exchangeAmount}
                 onChange={(e) => setExchangeAmount(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-gray-800 bg-black/60 p-2 text-xs text-white outline-none"
@@ -1311,9 +1295,10 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
             <button
               onClick={exchangeRedToCash}
-              className="mt-3 w-full rounded-xl bg-red-600 py-2.5 text-xs font-black"
+              disabled={busy}
+              className="mt-3 w-full rounded-xl bg-red-600 py-2.5 text-xs font-black disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Check Exchange
+              {busy ? 'Processing...' : 'Check Exchange'}
             </button>
           </div>
         </div>
@@ -1340,10 +1325,10 @@ Hello Team, I have created a deposit request in the app. Please share payment de
             </p>
 
             <label className="block text-[10px] font-bold text-gray-400">
-              Amount (NPR)
+              Amount (NPR) — minimum {formatNumber(MIN_CASH_TO_RED)}
               <input
                 type="number"
-                min="1"
+                min={MIN_CASH_TO_RED}
                 value={cashToRedAmount}
                 onChange={(e) => setCashToRedAmount(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-gray-800 bg-black/60 p-2 text-xs text-white outline-none"
@@ -1352,9 +1337,10 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
             <button
               onClick={exchangeCashToRed}
-              className="mt-3 w-full rounded-xl bg-cyan-600 py-2.5 text-xs font-black text-black"
+              disabled={busy}
+              className="mt-3 w-full rounded-xl bg-cyan-600 py-2.5 text-xs font-black text-black disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Check Exchange
+              {busy ? 'Processing...' : 'Check Exchange'}
             </button>
           </div>
         </div>
@@ -1420,95 +1406,9 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       )}
 
-      {/* SETTINGS MODAL */}
-      {showSettingModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-cyan-500/50 bg-gray-900 p-4 shadow-2xl">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-xs font-black uppercase text-cyan-400">
-                ⚙️ Settings &amp; Support
-              </h3>
-              <button
-                onClick={() => setShowSettingModal(false)}
-                className="font-bold text-gray-400"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="mb-3 grid grid-cols-3 gap-1 rounded-xl bg-black/50 p-1">
-              {(['support', 'terms', 'about'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  onClick={() => setSettingTab(tab)}
-                  className={`rounded-lg py-1.5 text-[9px] font-bold uppercase ${
-                    settingTab === tab
-                      ? 'bg-cyan-500 text-black'
-                      : 'text-gray-400 hover:text-white'
-                  }`}
-                >
-                  {tab}
-                </button>
-              ))}
-            </div>
-
-            <div className="min-h-[120px] rounded-xl border border-gray-800 bg-black/40 p-3 text-[11px] text-gray-300">
-              {settingTab === 'support' && (
-                <div className="space-y-2">
-                  <p className="font-bold text-cyan-300">
-                    Need Help? Contact Support
-                  </p>
-                  <p>
-                    WhatsApp:{' '}
-                    <span className="font-bold text-green-400">
-                      +977 9716782200
-                    </span>
-                  </p>
-                  <button
-                    onClick={() =>
-                      window.open(
-                        `https://wa.me/${SUPPORT_NUMBER}`,
-                        '_blank',
-                        'noopener,noreferrer'
-                      )
-                    }
-                    className="rounded-lg bg-green-600 px-3 py-2 text-[10px] font-bold text-white"
-                  >
-                    Contact on WhatsApp
-                  </button>
-                </div>
-              )}
-
-              {settingTab === 'terms' && (
-                <div className="space-y-2 text-[10px]">
-                  <p className="font-bold text-yellow-300">
-                    Terms &amp; Conditions
-                  </p>
-                  <p>• Payments and withdrawals require verification.</p>
-                  <p>• Bonuses may have turnover requirements.</p>
-                  <p>• Referral rewards depend on valid referral tracking.</p>
-                  <p>
-                    • Do not share passwords, OTPs, or private account details.
-                  </p>
-                </div>
-              )}
-
-              {settingTab === 'about' && (
-                <div className="space-y-2 text-[10px]">
-                  <p className="font-bold text-pink-300">
-                    About Arena Nepal
-                  </p>
-                  <p>
-                    Arena Nepal is a gaming and tournament platform. Wallet
-                    transactions must be verified through the official
-                    application backend.
-                  </p>
-                  <p>Support: +977 9716782200</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+      {/* SETTINGS (separate component) */}
+      {showSettings && (
+        <SettingsSection onClose={() => setShowSettings(false)} />
       )}
     </div>
   );
