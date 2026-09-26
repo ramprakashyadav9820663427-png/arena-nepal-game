@@ -198,7 +198,8 @@ export default function Home() {
 
         if (data) {
           const localRed = readLocalRed();
-          const red = localRed !== null ? localRed : (data.red_diamonds ?? 0);
+          const isNewPlayer = (data.red_diamonds ?? 0) === 0 && data.welcome_bonus_claimed !== true;
+          const red = isNewPlayer ? 0 : (localRed !== null ? localRed : (data.red_diamonds ?? 0));
           const white = data.white_diamonds ?? 0;
           const cash = data.winning_cash ?? 0;
           updateBalances(red, white, cash);

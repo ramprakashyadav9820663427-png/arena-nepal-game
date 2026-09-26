@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { supabaseAdmin } from '@/lib/supabaseadmin';
 
 const VALID_ROLES = ['deposit', 'withdraw', 'password_reset', 'owner'];
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { supabaseAdmin } from '@/lib/supabaseadmin';
 
 export async function POST(request: Request) {
   const auth = await verifyAdminRequest(request, 'password_reset');
