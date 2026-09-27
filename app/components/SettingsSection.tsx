@@ -12,7 +12,7 @@ const TIKTOK_URL = 'https://www.tiktok.com/@arenanepal05';
 const INSTAGRAM_URL = 'https://www.instagram.com/arenanepal143';
 const FACEBOOK_URL = 'https://www.facebook.com/share/1HohZyjT5B/';
 const WHATSAPP_NUMBER = '9779716782200';
-const OFFLINE_NUMBER = '97797174878651';
+const OFFLINE_NUMBER = '9779717487851';
 
 export default function SettingsSection({ onClose }: SettingsSectionProps) {
   const [loggingOut, setLoggingOut] = useState(false);
@@ -82,7 +82,7 @@ export default function SettingsSection({ onClose }: SettingsSectionProps) {
             className="flex w-full items-center justify-between rounded-xl border border-gray-700 bg-black/40 px-3 py-2.5 text-[11px] font-bold text-gray-200 transition hover:border-gray-500"
           >
             <span>📞 Offline Call</span>
-            <span className="text-[10px] text-gray-400">+977 97174878651</span>
+            <span className="text-[10px] text-gray-400">+977 9717487851</span>
           </a>
         </div>
 

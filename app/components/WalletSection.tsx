@@ -1,9 +1,9 @@
+
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { getGlobalBalance } from '@/lib/wallet';
-import SettingsSection from '@/components/SettingsSection';
 
 type WalletSectionProps = {
   wallet?: {
@@ -36,7 +36,6 @@ const MIN_RED_TO_CASH = 500;
 const MIN_CASH_TO_RED = 500;
 
 const RED_PACKAGES = [
-  { diamonds: 100, price: 100 },
   { diamonds: 250, price: 250 },
   { diamonds: 500, price: 500 },
   { diamonds: 1000, price: 1000 },
@@ -89,8 +88,6 @@ export default function WalletSection({
 
   const [depositMethod, setDepositMethod] =
     useState<PaymentMethod>('eSewa');
-  const [enableBonus, setEnableBonus] = useState(true);
-  const [isFirstDeposit, setIsFirstDeposit] = useState(true);
 
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
 
@@ -104,7 +101,6 @@ export default function WalletSection({
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [showCashToRedModal, setShowCashToRedModal] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
 
   const [inputName, setInputName] = useState('');
   const [inputMobile, setInputMobile] = useState('');
@@ -116,8 +112,12 @@ export default function WalletSection({
   const [withdrawAmount, setWithdrawAmount] = useState('500');
   const [withdrawQrImage, setWithdrawQrImage] = useState<File | null>(null);
 
-  const [exchangeAmount, setExchangeAmount] = useState(String(MIN_RED_TO_CASH));
-  const [cashToRedAmount, setCashToRedAmount] = useState(String(MIN_CASH_TO_RED));
+  const [exchangeAmount, setExchangeAmount] = useState(
+    String(MIN_RED_TO_CASH)
+  );
+  const [cashToRedAmount, setCashToRedAmount] = useState(
+    String(MIN_CASH_TO_RED)
+  );
 
   const redToCashInFlightRef = useRef(false);
   const cashToRedInFlightRef = useRef(false);
@@ -242,15 +242,6 @@ export default function WalletSection({
         applyBalances(getGlobalBalance(), 0, 0);
       }
 
-      const { count, error: depositError } = await supabase
-        .from('deposit_requests')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_uid', uid);
-
-      if (!depositError && count !== null) {
-        setIsFirstDeposit(count === 0);
-      }
-
       const { data: history, error: historyError } = await supabase
         .from('withdraw_requests')
         .select('*')
@@ -289,10 +280,12 @@ export default function WalletSection({
 
   useEffect(() => {
     if (wallet) {
-      if (typeof wallet.redDiamonds === 'number') setRedDiamonds(wallet.redDiamonds);
+      if (typeof wallet.redDiamonds === 'number')
+        setRedDiamonds(wallet.redDiamonds);
       if (typeof wallet.whiteDiamonds === 'number')
         setWhiteDiamonds(wallet.whiteDiamonds);
-      if (typeof wallet.winningCash === 'number') setWinningCash(wallet.winningCash);
+      if (typeof wallet.winningCash === 'number')
+        setWinningCash(wallet.winningCash);
     }
   }, [wallet]);
 
@@ -314,7 +307,6 @@ export default function WalletSection({
     const setupRealtime = (profileUserId: string) => {
       tearDownRealtime();
 
-      // Unique name every time → avoids "callbacks after subscribe" on reused channel
       const channelName = `wallet-profile:${profileUserId}:${Date.now()}`;
 
       const channel = supabase
@@ -345,7 +337,8 @@ export default function WalletSection({
 
             applyBalances(red, white, cash);
 
-            if (typeof row.bonus_taken === 'boolean') setBonusTaken(row.bonus_taken);
+            if (typeof row.bonus_taken === 'boolean')
+              setBonusTaken(row.bonus_taken);
             if (typeof row.turnover_required === 'number')
               setTurnoverRequired(row.turnover_required);
             if (typeof row.turnover_completed === 'number')
@@ -825,12 +818,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
             >
               Edit Profile
             </button>
-            <button
-              onClick={() => setShowSettings(true)}
-              className="rounded-lg border border-gray-700 bg-gray-800 px-2.5 py-1 text-[10px] font-bold text-gray-300"
-            >
-              ⚙️ Settings
-            </button>
           </div>
         </div>
 
@@ -949,53 +936,31 @@ Hello Team, I have created a deposit request in the app. Please share payment de
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-[11px] text-gray-300">
-              <input
-                type="checkbox"
-                checked={enableBonus}
-                onChange={(e) => setEnableBonus(e.target.checked)}
-                className="rounded"
-              />
-              Request deposit bonus
-            </label>
-
             <p className="text-[10px] font-bold text-gray-400">
               2. Select Red Diamond Package
             </p>
 
-            {RED_PACKAGES.map((pkg) => {
-              const percent = isFirstDeposit ? 50 : 25;
-              const bonus = enableBonus
-                ? Math.floor((pkg.diamonds * percent) / 100)
-                : 0;
-
-              return (
-                <div
-                  key={pkg.diamonds}
-                  className="flex items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900 p-3 shadow"
-                >
-                  <div>
-                    <p className="text-xs font-bold text-white">
-                      🔴 {formatNumber(pkg.diamonds)} Red Diamonds
-                    </p>
-                    {enableBonus && (
-                      <p className="text-[10px] text-pink-400">
-                        Bonus request: +{formatNumber(bonus)}
-                      </p>
-                    )}
-                    <p className="mt-1 text-[10px] text-yellow-400">
-                      NPR {formatNumber(pkg.price)}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleDeposit(pkg.diamonds, pkg.price)}
-                    className="shrink-0 rounded-lg bg-green-600 px-3 py-2 text-[10px] font-bold text-white transition hover:bg-green-500"
-                  >
-                    Request
-                  </button>
+            {RED_PACKAGES.map((pkg) => (
+              <div
+                key={pkg.diamonds}
+                className="flex items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-900 p-3 shadow"
+              >
+                <div>
+                  <p className="text-xs font-bold text-white">
+                    🔴 {formatNumber(pkg.diamonds)} Red Diamonds
+                  </p>
+                  <p className="mt-1 text-[10px] text-yellow-400">
+                    NPR {formatNumber(pkg.price)}
+                  </p>
                 </div>
-              );
-            })}
+                <button
+                  onClick={() => handleDeposit(pkg.diamonds, pkg.price)}
+                  className="shrink-0 rounded-lg bg-green-600 px-3 py-2 text-[10px] font-bold text-white transition hover:bg-green-500"
+                >
+                  Request
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -1104,7 +1069,9 @@ Hello Team, I have created a deposit request in the app. Please share payment de
           <section className="flex w-full flex-col gap-4 rounded-2xl border-2 border-pink-500/60 bg-gradient-to-br from-purple-950 via-gray-900 to-indigo-950 p-4 shadow-2xl">
             <div className="text-center">
               <span className="text-3xl">🤝</span>
-              <h3 className="mt-1 text-xs font-black uppercase">Refer Friends</h3>
+              <h3 className="mt-1 text-xs font-black uppercase">
+                Refer Friends
+              </h3>
               <p className="mt-1 text-[10px] text-gray-300">
                 Share your referral link. Any reward or commission is subject to
                 the referral system being configured and approved.
@@ -1385,10 +1352,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
             </form>
           </div>
         </div>
-      )}
-
-      {showSettings && (
-        <SettingsSection onClose={() => setShowSettings(false)} />
       )}
     </div>
   );

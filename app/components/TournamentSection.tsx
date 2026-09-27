@@ -59,15 +59,11 @@ const FALLBACK_TIERS: Record<DbTournamentType, number[]> = {
   mega: [15000, 7000, 6000, 5000, 4000, 3200, 2800, 2500, 2300, 2200],
 };
 
-const GAME_DURATION_SECONDS = 300;
-
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
-
   if (typeof error === 'object' && error !== null && 'message' in error) {
     return String((error as { message: unknown }).message);
   }
-
   return 'Something went wrong. Please try again.';
 }
 
@@ -75,7 +71,7 @@ function formatMoney(value: number | null | undefined): string {
   return Number(value ?? 0).toLocaleString('en-IN');
 }
 
-function formatTime(seconds: number): string {
+function formatSurviveTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
@@ -84,14 +80,16 @@ function formatTime(seconds: number): string {
 function getTournamentLabel(type: TournamentType): string {
   if (type === 'DAY') return 'DAILY TOURNAMENT';
   if (type === 'WEEK') return 'WEEKLY TOURNAMENT';
-  if (type === 'MEGA') return 'MEGA SHOWDOWN';
+  if (type === 'MEGA') return 'MONTHLY TOURNAMENT';
   return 'TOURNAMENT';
 }
 
 function getTournamentWindow(type: TournamentType): string {
-  if (type === 'DAY') return 'Daily: 6:00 AM – 6:00 PM NPT';
-  if (type === 'WEEK') return 'Every Friday: 6:00 AM – 6:00 PM NPT';
-  if (type === 'MEGA') return 'Every ~10 days: 6:00 AM – 6:00 PM NPT';
+  if (type === 'DAY') return 'Daily: 6:00 AM – 6:00 PM NPT · Result 7:00 PM';
+  if (type === 'WEEK')
+    return 'Every Friday: 6:00 AM – 6:00 PM NPT · Result 7:00 PM';
+  if (type === 'MEGA')
+    return '1st of every month: 6:00 AM – 6:00 PM NPT · Result 7:00 PM';
   return '';
 }
 
@@ -100,40 +98,30 @@ function getFirstPrize(
   dbType: DbTournamentType
 ): number {
   const dist = record?.reward_distribution;
-
   if (Array.isArray(dist) && dist.length > 0 && typeof dist[0] === 'number') {
     return dist[0];
   }
-
   return FALLBACK_TIERS[dbType][0];
 }
 
 function isRecordOpen(tournament: TournamentRecord): boolean {
   const now = Date.now();
-
   if (tournament.status !== 'active') return false;
-
   if (
     tournament.start_time &&
     new Date(tournament.start_time).getTime() > now
   ) {
     return false;
   }
-
   if (
     tournament.end_time &&
     new Date(tournament.end_time).getTime() <= now
   ) {
     return false;
   }
-
   return true;
 }
 
-// Pick the most relevant row for a given type:
-// 1) the one currently open, else
-// 2) the nearest upcoming one, else
-// 3) the most recent past one.
 function pickTournamentRecord(
   records: TournamentRecord[],
   dbType: DbTournamentType
@@ -142,15 +130,13 @@ function pickTournamentRecord(
   if (matches.length === 0) return undefined;
 
   const now = Date.now();
-
   const open = matches.find((item) => isRecordOpen(item));
   if (open) return open;
 
   const upcoming = matches
     .filter(
       (item) =>
-        item.start_time &&
-        new Date(item.start_time).getTime() > now
+        item.start_time && new Date(item.start_time).getTime() > now
     )
     .sort(
       (a, b) =>
@@ -183,13 +169,15 @@ export default function TournamentSection() {
   const [inLobby, setInLobby] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
 
-  const [timeLeft, setTimeLeft] = useState(GAME_DURATION_SECONDS);
+  // Survive time (counts UP) — no 5-minute limit
+  const [surviveSeconds, setSurviveSeconds] = useState(0);
   const [score, setScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
 
   const [message, setMessage] = useState('');
-  const [messageType, setMessageType] =
-    useState<'error' | 'success' | ''>('');
+  const [messageType, setMessageType] = useState<'error' | 'success' | ''>(
+    ''
+  );
 
   const [playerName, setPlayerName] = useState('Player');
   const [playerUid, setPlayerUid] = useState('');
@@ -202,7 +190,7 @@ export default function TournamentSection() {
   const obstaclesRef = useRef<GameObstacle[]>([]);
 
   const scoreRef = useRef(0);
-  const timeLeftRef = useRef(GAME_DURATION_SECONDS);
+  const surviveSecondsRef = useRef(0);
   const activeTournamentRef = useRef<TournamentType>('NONE');
   const gameStartedRef = useRef(false);
   const gameOverRef = useRef(false);
@@ -226,15 +214,6 @@ export default function TournamentSection() {
     setMessageType('');
   }, []);
 
-  /*
-   * GLOBAL BALANCE SYNC
-   *
-   * TournamentSection must use the same wallet balance source
-   * as the rest of the app.
-   *
-   * Profile data is still read for player information, but
-   * Red Diamonds are taken from getWalletBalance().
-   */
   const loadProfile = useCallback(async () => {
     const {
       data: { user },
@@ -250,10 +229,6 @@ export default function TournamentSection() {
       return null;
     }
 
-    /*
-     * Read player/profile information.
-     * Balance is intentionally NOT taken from this query.
-     */
     const { data: profile, error } = await supabase
       .from('profiles')
       .select('nickname, gaming_nickname, full_name')
@@ -262,15 +237,8 @@ export default function TournamentSection() {
 
     if (error) throw error;
 
-    /*
-     * IMPORTANT:
-     * Read the balance from the shared/global wallet source.
-     * This keeps TournamentSection synchronized with Wallet,
-     * Home and the other game sections.
-     */
     const globalBalance = await getWalletBalance();
     const red = Number(globalBalance ?? 0);
-
     setRedDiamonds(red);
 
     if (profile) {
@@ -280,20 +248,17 @@ export default function TournamentSection() {
         profile.full_name ||
         user.email ||
         'Player';
-
       setPlayerName(name);
     } else {
       setPlayerName(user.email || 'Player');
     }
 
     setPlayerUid(user.id);
-
     return red;
   }, []);
 
   const loadTournaments = useCallback(async () => {
     setLoadingTournaments(true);
-
     try {
       const { data, error } = await supabase
         .from('tournaments')
@@ -305,7 +270,6 @@ export default function TournamentSection() {
         .limit(30);
 
       if (error) throw error;
-
       setTournaments((data || []) as TournamentRecord[]);
     } catch (error) {
       showMessage(`Could not load tournaments: ${getErrorMessage(error)}`);
@@ -327,14 +291,6 @@ export default function TournamentSection() {
 
     void initialize();
 
-    /*
-     * Listen for wallet changes from the rest of the app.
-     *
-     * IMPORTANT:
-     * We only READ the new global balance here.
-     * We do not call updateGlobalBalance() from this listener,
-     * preventing a wallet-update loop.
-     */
     const handleStorage = () => {
       void loadProfile().catch((error) => {
         showMessage(getErrorMessage(error));
@@ -361,7 +317,6 @@ export default function TournamentSection() {
     const interval = window.setInterval(() => {
       void loadTournaments();
     }, 60000);
-
     return () => window.clearInterval(interval);
   }, [loadTournaments]);
 
@@ -377,21 +332,17 @@ export default function TournamentSection() {
               webkitAudioContext?: typeof AudioContext;
             }
           ).webkitAudioContext;
-
         if (!AudioContextClass) return;
         audioCtxRef.current = new AudioContextClass();
       }
 
       const ctx = audioCtxRef.current;
-
       if (ctx.state === 'suspended') void ctx.resume();
 
       const oscillator = ctx.createOscillator();
       const gain = ctx.createGain();
-
       oscillator.connect(gain);
       gain.connect(ctx.destination);
-
       const now = ctx.currentTime;
 
       if (type === 'score') {
@@ -427,15 +378,12 @@ export default function TournamentSection() {
       try {
         const { data: sessionData, error: sessionError } =
           await supabase.auth.getSession();
-
         if (sessionError) throw sessionError;
-
         if (!sessionData.session?.user) {
           throw new Error('Please login again to submit your score.');
         }
 
         const tournamentId = activeRecord?.id;
-
         if (!tournamentId) {
           throw new Error('Tournament record not found.');
         }
@@ -467,17 +415,9 @@ export default function TournamentSection() {
         gameOverRef.current = true;
         setInLobby(false);
 
-        showMessage(
-          'Your score was submitted successfully.',
-          'success'
-        );
+        showMessage('Your score was submitted successfully.', 'success');
 
-        /*
-         * Refresh the shared balance after the tournament
-         * server has finished processing the attempt.
-         */
         const freshBalance = await loadProfile();
-
         if (freshBalance !== null) {
           updateGlobalBalance(freshBalance);
         }
@@ -489,13 +429,7 @@ export default function TournamentSection() {
         setLoadingAction(false);
       }
     },
-    [
-      activeRecord,
-      clearMessage,
-      loadProfile,
-      loadTournaments,
-      showMessage,
-    ]
+    [activeRecord, clearMessage, loadProfile, loadTournaments, showMessage]
   );
 
   const finishGame = useCallback(
@@ -504,10 +438,8 @@ export default function TournamentSection() {
 
       gameOverRef.current = true;
       gameStartedRef.current = false;
-
       setGameStarted(false);
       setGameOver(true);
-
       playSound('gameover');
 
       await submitScore(finalScore, Math.max(0, finalScore));
@@ -518,7 +450,6 @@ export default function TournamentSection() {
   const handleJoinClick = useCallback(
     async (type: TournamentType) => {
       clearMessage();
-
       if (type === 'NONE') return;
 
       const dbType = TYPE_MAP[type] as DbTournamentType;
@@ -549,7 +480,6 @@ export default function TournamentSection() {
       setLoadingAction(true);
 
       try {
-        // UI safeguard only; database uniqueness is still required.
         const { data: existing, error: existingError } = await supabase
           .from('tournament_participants')
           .select('id, status')
@@ -568,22 +498,8 @@ export default function TournamentSection() {
           return;
         }
 
-        const fee = Number(
-          record.entry_fee ?? FALLBACK_FEES[record.type]
-        );
-
-        /*
-         * IMPORTANT:
-         * Read the latest global balance immediately before
-         * checking the tournament entry fee.
-         *
-         * This prevents a stale TournamentSection state from
-         * being used when Wallet was changed elsewhere.
-         */
-        const latestGlobalBalance = Number(
-          (await getWalletBalance()) ?? 0
-        );
-
+        const fee = Number(record.entry_fee ?? FALLBACK_FEES[record.type]);
+        const latestGlobalBalance = Number((await getWalletBalance()) ?? 0);
         setRedDiamonds(latestGlobalBalance);
 
         if (latestGlobalBalance < fee) {
@@ -593,10 +509,9 @@ export default function TournamentSection() {
           return;
         }
 
-        const { data, error } = await supabase.rpc(
-          'join_tournament',
-          { p_tournament_id: record.id }
-        );
+        const { data, error } = await supabase.rpc('join_tournament', {
+          p_tournament_id: record.id,
+        });
 
         if (error) throw error;
 
@@ -611,46 +526,29 @@ export default function TournamentSection() {
 
         setActiveTournament(type);
         activeTournamentRef.current = type;
-
         setInLobby(true);
         setGameStarted(false);
         gameStartedRef.current = false;
-
         setGameOver(false);
         gameOverRef.current = false;
-
         setScore(0);
         scoreRef.current = 0;
-
-        setTimeLeft(GAME_DURATION_SECONDS);
-        timeLeftRef.current = GAME_DURATION_SECONDS;
-
+        setSurviveSeconds(0);
+        surviveSecondsRef.current = 0;
         submittingRef.current = false;
 
-        /*
-         * Entry fee was deducted server-side.
-         * Read the fresh global wallet balance and broadcast it
-         * so Wallet/Home/other sections remain synchronized.
-         */
         const freshBalance = await loadProfile();
-
         if (freshBalance !== null) {
           updateGlobalBalance(freshBalance);
         }
       } catch (error) {
         showMessage(getErrorMessage(error));
-
         await loadProfile().catch(() => undefined);
       } finally {
         setLoadingAction(false);
       }
     },
-    [
-      clearMessage,
-      loadProfile,
-      showMessage,
-      tournaments,
-    ]
+    [clearMessage, loadProfile, showMessage, tournaments]
   );
 
   const startTourneyGamePlay = useCallback(async () => {
@@ -674,17 +572,14 @@ export default function TournamentSection() {
     try {
       const { data: sessionData, error: sessionError } =
         await supabase.auth.getSession();
-
       if (sessionError) throw sessionError;
-
       if (!sessionData.session?.user) {
         throw new Error('Please login before starting.');
       }
 
-      const { data, error } = await supabase.rpc(
-        'start_tournament_attempt',
-        { p_tournament_id: record.id }
-      );
+      const { data, error } = await supabase.rpc('start_tournament_attempt', {
+        p_tournament_id: record.id,
+      });
 
       if (error) throw error;
 
@@ -700,19 +595,14 @@ export default function TournamentSection() {
       setInLobby(false);
       setGameStarted(true);
       gameStartedRef.current = true;
-
       setGameOver(false);
       gameOverRef.current = false;
-
       setScore(0);
       scoreRef.current = 0;
-
-      setTimeLeft(GAME_DURATION_SECONDS);
-      timeLeftRef.current = GAME_DURATION_SECONDS;
-
+      setSurviveSeconds(0);
+      surviveSecondsRef.current = 0;
       playerRef.current = { x: 150, y: 350, size: 20 };
       obstaclesRef.current = [];
-
       submittingRef.current = false;
     } catch (error) {
       showMessage(getErrorMessage(error));
@@ -724,52 +614,36 @@ export default function TournamentSection() {
   const exitToTournaments = useCallback(() => {
     setGameStarted(false);
     gameStartedRef.current = false;
-
     setInLobby(false);
-
     setGameOver(false);
     gameOverRef.current = false;
-
     setActiveTournament('NONE');
     activeTournamentRef.current = 'NONE';
-
     setScore(0);
     scoreRef.current = 0;
-
-    setTimeLeft(GAME_DURATION_SECONDS);
-    timeLeftRef.current = GAME_DURATION_SECONDS;
-
+    setSurviveSeconds(0);
+    surviveSecondsRef.current = 0;
     clearMessage();
 
-    /*
-     * Refresh the global balance when returning to the
-     * tournament list so the displayed amount is current.
-     */
     void loadProfile().catch((error) => {
       showMessage(getErrorMessage(error));
     });
   }, [clearMessage, loadProfile, showMessage]);
 
+  // Survive timer counts UP — does NOT end the game
   useEffect(() => {
     if (!gameStarted || gameOver) return;
 
     const timer = window.setInterval(() => {
-      setTimeLeft((previous) => {
-        const next = Math.max(0, previous - 1);
-        timeLeftRef.current = next;
-
-        if (next <= 0) {
-          window.setTimeout(() => {
-            void finishGame(scoreRef.current);
-          }, 0);
-        }
-
+      setSurviveSeconds((previous) => {
+        const next = previous + 1;
+        surviveSecondsRef.current = next;
         return next;
       });
     }, 1000);
 
     return () => window.clearInterval(timer);
-  }, [gameStarted, gameOver, finishGame]);
+  }, [gameStarted, gameOver]);
 
   useEffect(() => {
     if (!gameStarted || gameOver) return;
@@ -787,7 +661,6 @@ export default function TournamentSection() {
       if (!gameStartedRef.current || gameOverRef.current) return;
 
       if (!lastFrameTime) lastFrameTime = timestamp;
-
       const delta = Math.min((timestamp - lastFrameTime) / 16.67, 2);
       lastFrameTime = timestamp;
 
@@ -795,7 +668,6 @@ export default function TournamentSection() {
 
       ctx.strokeStyle = 'rgba(0, 255, 255, 0.08)';
       ctx.lineWidth = 1;
-
       for (let i = 0; i < canvas.width; i += 30) {
         ctx.beginPath();
         ctx.moveTo(i, 0);
@@ -804,16 +676,13 @@ export default function TournamentSection() {
       }
 
       const currentTournament = activeTournamentRef.current;
-
       const speedMultiplier =
         currentTournament === 'MEGA'
           ? 1.5
           : currentTournament === 'WEEK'
             ? 1.2
             : 1;
-
-      const spawnChance =
-        currentTournament === 'MEGA' ? 0.04 : 0.03;
+      const spawnChance = currentTournament === 'MEGA' ? 0.04 : 0.03;
 
       if (Math.random() < spawnChance * delta) {
         obstaclesRef.current.push({
@@ -826,28 +695,17 @@ export default function TournamentSection() {
 
       ctx.fillStyle =
         currentTournament === 'MEGA' ? '#ff3300' : '#ff0055';
-
       ctx.shadowBlur = 8;
       ctx.shadowColor =
         currentTournament === 'MEGA' ? '#ff3300' : '#ff0055';
 
       const player = playerRef.current;
 
-      for (
-        let index = obstaclesRef.current.length - 1;
-        index >= 0;
-        index--
-      ) {
+      for (let index = obstaclesRef.current.length - 1; index >= 0; index--) {
         const obstacle = obstaclesRef.current[index];
-
         obstacle.y += obstacle.speed * delta;
 
-        ctx.fillRect(
-          obstacle.x,
-          obstacle.y,
-          obstacle.size,
-          obstacle.size
-        );
+        ctx.fillRect(obstacle.x, obstacle.y, obstacle.size, obstacle.size);
 
         const collision =
           player.x < obstacle.x + obstacle.size &&
@@ -862,32 +720,20 @@ export default function TournamentSection() {
 
         if (obstacle.y > canvas.height) {
           obstaclesRef.current.splice(index, 1);
-
           const points = currentTournament === 'MEGA' ? 20 : 10;
-
           scoreRef.current += points;
           setScore(scoreRef.current);
-
           playSound('score');
         }
       }
 
       ctx.shadowBlur = 0;
-
       ctx.fillStyle =
         currentTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
-
       ctx.shadowBlur = 12;
       ctx.shadowColor =
         currentTournament === 'MEGA' ? '#ffcc00' : '#00ffcc';
-
-      ctx.fillRect(
-        player.x,
-        player.y,
-        player.size,
-        player.size
-      );
-
+      ctx.fillRect(player.x, player.y, player.size, player.size);
       ctx.shadowBlur = 0;
 
       animationId = window.requestAnimationFrame(updateGame);
@@ -917,12 +763,8 @@ export default function TournamentSection() {
     if (!canvas || !gameStartedRef.current) return;
 
     const rect = canvas.getBoundingClientRect();
-
     const clientX =
-      'touches' in event
-        ? event.touches[0]?.clientX
-        : event.clientX;
-
+      'touches' in event ? event.touches[0]?.clientX : event.clientX;
     if (clientX === undefined) return;
 
     const scaleX = canvas.width / rect.width;
@@ -941,13 +783,10 @@ export default function TournamentSection() {
   ) => {
     const dbType = TYPE_MAP[type] as DbTournamentType;
     const record = pickTournamentRecord(tournaments, dbType);
-
     const open = record ? isRecordOpen(record) : false;
-
     const fee = record
       ? Number(record.entry_fee ?? FALLBACK_FEES[dbType])
       : FALLBACK_FEES[dbType];
-
     const firstPrize = getFirstPrize(record, dbType);
 
     return (
@@ -959,9 +798,8 @@ export default function TournamentSection() {
 
         <div className="flex justify-between items-center gap-2">
           <span className="text-xs font-black text-yellow-400 uppercase tracking-wider">
-            {icon} {getTournamentLabel(type)} (5 MINS)
+            {icon} {getTournamentLabel(type)}
           </span>
-
           <span className="text-[10px] bg-yellow-500/20 text-yellow-300 px-2.5 py-1 rounded-xl border border-yellow-500/40 font-black whitespace-nowrap">
             {formatMoney(fee)} Red Dias 🔴
           </span>
@@ -979,6 +817,10 @@ export default function TournamentSection() {
 
         <p className="text-[11px] text-gray-400">
           {getTournamentWindow(type)}
+        </p>
+
+        <p className="text-[10px] text-cyan-400/80">
+          Survive as long as you can · No time limit
         </p>
 
         {record && (
@@ -1025,17 +867,17 @@ export default function TournamentSection() {
       {inLobby ? (
         <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-5 flex flex-col items-center shadow-2xl relative text-center">
           <h2 className="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400 uppercase mb-3">
-            {getTournamentLabel(activeTournament)} LOBBY (5 MINS)
+            {getTournamentLabel(activeTournament)} LOBBY
           </h2>
 
           <div className="bg-black/60 p-4 rounded-2xl border border-red-500/40 mb-5 text-left">
             <p className="text-xs text-red-400 font-bold mb-1">
               Important Warning
             </p>
-
             <p className="text-[11px] text-gray-300 leading-relaxed font-medium">
-              Your attempt is recorded by the tournament server.
-              Once the match starts, you cannot restart or resume it.
+              Survive as long as you can. There is no 5-minute limit.
+              Score increases while you avoid obstacles. One hit = match over.
+              One attempt only — no restart.
             </p>
           </div>
 
@@ -1047,7 +889,7 @@ export default function TournamentSection() {
           >
             {loadingAction
               ? 'STARTING...'
-              : `▶️ ${t.playNow || 'START MATCH'} (5 MINUTES)`}
+              : `▶️ ${t.playNow || 'START MATCH'} (SURVIVE MODE)`}
           </button>
 
           <button
@@ -1062,11 +904,10 @@ export default function TournamentSection() {
         <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-4 flex flex-col items-center shadow-2xl relative">
           <div className="w-full flex justify-between items-center mb-3 bg-black/60 px-3 py-2 rounded-2xl border border-gray-800">
             <span className="text-xs font-black text-yellow-400">
-              ⏱️ {formatTime(timeLeft)}
+              ⏱️ Survive {formatSurviveTime(surviveSeconds)}
             </span>
-
             <span className="text-xs font-black text-cyan-300">
-              Total Score: {score}
+              Score: {score}
             </span>
           </div>
 
@@ -1074,30 +915,27 @@ export default function TournamentSection() {
             {gameOver && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 backdrop-blur-md z-10 p-4 text-center gap-2">
                 <h2 className="text-base font-black text-red-500 uppercase">
-                  {timeLeft <= 0
-                    ? 'Tournament Time Up!'
-                    : 'Match Over'}
+                  Match Over
                 </h2>
-
                 <p className="text-xs text-gray-300">
-                  Player:{' '}
-                  <span className="text-white font-bold">
-                    {playerName}
+                  Survived:{' '}
+                  <span className="text-yellow-300 font-bold">
+                    {formatSurviveTime(surviveSeconds)}
                   </span>
                 </p>
-
+                <p className="text-xs text-gray-300">
+                  Player:{' '}
+                  <span className="text-white font-bold">{playerName}</span>
+                </p>
                 <p className="text-xs text-gray-300">
                   UID:{' '}
                   <span className="text-cyan-300 font-bold">
                     {playerUid || '—'}
                   </span>
                 </p>
-
                 <p className="text-xs text-gray-300">
-                  Cumulative Score:{' '}
-                  <span className="text-cyan-400 font-bold">
-                    {score}
-                  </span>
+                  Score:{' '}
+                  <span className="text-cyan-400 font-bold">{score}</span>
                 </p>
 
                 {loadingAction && (
@@ -1108,7 +946,8 @@ export default function TournamentSection() {
 
                 {!loadingAction && messageType === 'error' && (
                   <p className="text-xs text-red-300">
-                    Score submission needs attention. Do not start another match.
+                    Score submission needs attention. Do not start another
+                    match.
                   </p>
                 )}
 
@@ -1139,7 +978,6 @@ export default function TournamentSection() {
             <span className="text-xs font-bold text-gray-300">
               Your Red Diamonds:
             </span>
-
             <span className="text-xs font-black text-red-400">
               {formatMoney(redDiamonds)} 🔴
             </span>
@@ -1155,23 +993,9 @@ export default function TournamentSection() {
             </div>
           ) : (
             <>
-              {renderTournamentCard(
-                'DAY',
-                '☀️',
-                'border-yellow-500/50'
-              )}
-
-              {renderTournamentCard(
-                'WEEK',
-                '📅',
-                'border-blue-500/50'
-              )}
-
-              {renderTournamentCard(
-                'MEGA',
-                '⚡',
-                'border-pink-500/50'
-              )}
+              {renderTournamentCard('DAY', '☀️', 'border-yellow-500/50')}
+              {renderTournamentCard('WEEK', '📅', 'border-blue-500/50')}
+              {renderTournamentCard('MEGA', '📅', 'border-pink-500/50')}
             </>
           )}
         </div>

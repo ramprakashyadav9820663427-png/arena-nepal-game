@@ -1,76 +1,67 @@
-
-import type { Metadata } from "next";
-import "./globals.css";
-import { LanguageProvider } from "./context/LanguageContext";
+import type { Metadata } from 'next';
+import './globals.css';
+import { LanguageProvider } from './context/LanguageContext';
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://arenanepal.xyz"),
+  metadataBase: new URL('https://arenanepal.xyz'),
 
   title: {
-    default: "Arena Nepal",
-    template: "%s | Arena Nepal",
+    default: 'Arena Nepal',
+    template: '%s | Arena Nepal',
   },
 
   description:
-    "Welcome to Arena Nepal. Explore games, tournaments, rewards, and your gaming experience in one place.",
+    'Welcome to Arena Nepal. Explore games, tournaments, rewards, and your gaming experience in one place.',
+
+  manifest: '/manifest.json',
 
   icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
-    apple: "/icon.png",
+    icon: [{ url: '/arena-nepal-logo.jpg', type: 'image/jpeg' }],
+    shortcut: '/arena-nepal-logo.jpg',
+    apple: '/arena-nepal-logo.jpg',
   },
 
   openGraph: {
-    title: "Arena Nepal",
+    title: 'Arena Nepal',
     description:
-      "Explore games, tournaments, rewards, and your gaming experience with Arena Nepal.",
-    url: "https://arenanepal.xyz",
-    siteName: "Arena Nepal",
+      'Explore games, tournaments, rewards, and your gaming experience with Arena Nepal.',
+    url: 'https://arenanepal.xyz',
+    siteName: 'Arena Nepal',
     images: [
       {
-        url: "/icon.png",
+        url: '/arena-nepal-logo.jpg',
         width: 512,
         height: 512,
-        alt: "Arena Nepal",
+        alt: 'Arena Nepal',
       },
     ],
-    type: "website",
+    type: 'website',
   },
 
   twitter: {
-    card: "summary_large_image",
-    title: "Arena Nepal",
+    card: 'summary_large_image',
+    title: 'Arena Nepal',
     description:
-      "Explore games, tournaments, and rewards with Arena Nepal.",
-    images: ["/icon.png"],
+      'Explore games, tournaments, and rewards with Arena Nepal.',
+    images: ['/arena-nepal-logo.jpg'],
   },
 };
 
 const jsonLd = {
-  "@context": "https://schema.org",
-  "@type": "WebSite",
-  name: "Arena Nepal",
-  url: "https://arenanepal.xyz",
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'Arena Nepal',
+  url: 'https://arenanepal.xyz',
   potentialAction: [
     {
-      "@type": "ViewAction",
-      name: "Download App",
-      target: "https://arenanepal.xyz/#download",
+      '@type': 'ViewAction',
+      name: 'Download App',
+      target: 'https://arenanepal.xyz/#download',
     },
     {
-      "@type": "ViewAction",
-      name: "Login / Register",
-      target: "https://arenanepal.xyz/login",
-    },
-    {
-      "@type": "ViewAction",
-      name: "About Us",
-      target: "https://arenanepal.xyz/about",
-    },
-    {
-      "@type": "ViewAction",
-      name: "Help Center",
-      target: "https://arenanepal.xyz/help",
+      '@type': 'ViewAction',
+      name: 'Login / Register',
+      target: 'https://arenanepal.xyz',
     },
   ],
 };
@@ -83,14 +74,16 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <link rel="icon" href="/icon.png" />
-        <link rel="shortcut icon" href="/icon.png" />
-        <link rel="apple-touch-icon" href="/icon.png" />
+        <link rel="manifest" href="/manifest.json" />
+        <meta name="theme-color" content="#050508" />
+        <link rel="icon" href="/arena-nepal-logo.jpg" type="image/jpeg" />
+        <link rel="shortcut icon" href="/arena-nepal-logo.jpg" />
+        <link rel="apple-touch-icon" href="/arena-nepal-logo.jpg" />
 
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{
-            __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c"),
+            __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c'),
           }}
         />
       </head>

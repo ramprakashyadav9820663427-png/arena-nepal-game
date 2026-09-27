@@ -7,7 +7,14 @@ const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
 const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-type Tab = 'deposits' | 'withdraws' | 'players' | 'password' | 'workers';
+type Tab =
+  | 'deposits'
+  | 'withdraws'
+  | 'players'
+  | 'password'
+  | 'workers'
+  | 'create_player'
+  | 'tournaments';
 
 type DepositRequest = {
   id: number | string;
@@ -39,6 +46,27 @@ type Worker = {
   email: string;
   roles: string[];
   created_at: string;
+};
+
+type TournamentAdminRow = {
+  id: string;
+  title: string;
+  type: string;
+  type_label: string;
+  status: string;
+  start_time: string;
+  end_time: string;
+  entry_fee: number;
+  prize_pool: number;
+  joined_count: number;
+  played_count: number;
+  top_ranks: {
+    rank: number;
+    user_id: string;
+    score: number;
+    name: string;
+    uid: string;
+  }[];
 };
 
 const ROLE_LABELS: Record<string, string> = {
@@ -107,6 +135,22 @@ export default function AdminPage() {
   const [newWorkerRoles, setNewWorkerRoles] = useState<string[]>([]);
   const [creatingWorker, setCreatingWorker] = useState(false);
   const [lastCreatedWorker, setLastCreatedWorker] = useState<{ email: string; password: string } | null>(null);
+
+  // ---- Create player (owner) ----
+  const [newPlayerName, setNewPlayerName] = useState('');
+  const [newPlayerEmail, setNewPlayerEmail] = useState('');
+  const [newPlayerPhone, setNewPlayerPhone] = useState('');
+  const [creatingPlayer, setCreatingPlayer] = useState(false);
+  const [lastCreatedPlayer, setLastCreatedPlayer] = useState<{
+    email: string;
+    player_uid: string;
+    password: string;
+  } | null>(null);
+
+  // ---- Tournaments monitor (owner) ----
+  const [tournamentRows, setTournamentRows] = useState<TournamentAdminRow[]>([]);
+  const [loadingTournaments, setLoadingTournaments] = useState(false);
+  const [expandedTournamentId, setExpandedTournamentId] = useState<string | null>(null);
 
   const loadRolesForCurrentSession = useCallback(async () => {
     const { data, error } = await supabase.rpc('get_my_admin_roles');
@@ -191,7 +235,7 @@ export default function AdminPage() {
     setActiveTab(null);
   };
 
-  const authedFetch = async (path: string, body: unknown) => {
+  const authedFetch = async (path: string, body?: unknown, method: 'POST' | 'GET' = 'POST') => {
     const {
       data: { session },
     } = await supabase.auth.getSession();
@@ -203,12 +247,12 @@ export default function AdminPage() {
     }
 
     const res = await fetch(path, {
-      method: 'POST',
+      method,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(body),
+      body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
     });
 
     const json = await res.json().catch(() => ({}));
@@ -256,7 +300,10 @@ export default function AdminPage() {
   const rejectDeposit = async (id: string | number) => {
     setBusyDepositId(id);
     try {
-      const { error } = await supabase.rpc('admin_reject_deposit', { p_request_id: id, p_reason: null });
+      const { error } = await supabase.rpc('admin_reject_deposit', {
+        p_request_id: id,
+        p_reason: null,
+      });
       if (error) throw error;
       notify('Deposit rejected.');
       await fetchDeposits();
@@ -362,7 +409,9 @@ export default function AdminPage() {
     setSearchingPlayer(true);
     setPlayerResult(null);
     try {
-      const { data, error } = await supabase.rpc('admin_search_player', { p_uid: playerSearchUid.trim() });
+      const { data, error } = await supabase.rpc('admin_search_player', {
+        p_uid: playerSearchUid.trim(),
+      });
       if (error) throw error;
       setPlayerResult(data);
     } catch (err: any) {
@@ -379,7 +428,9 @@ export default function AdminPage() {
     setResettingPassword(true);
     setLastResetResult(null);
     try {
-      const result = await authedFetch('/api/admin/reset-password', { user_uid: resetUid.trim() });
+      const result = await authedFetch('/api/admin/reset-password', {
+        user_uid: resetUid.trim(),
+      });
       setLastResetResult({ uid: resetUid.trim(), password: result.temp_password });
       notify('Password reset. Share the new password with the player securely.');
     } catch (err: any) {
@@ -443,12 +494,62 @@ export default function AdminPage() {
     }
   };
 
+  // ---------------- Create player (owner) ----------------
+
+  const createPlayer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreatingPlayer(true);
+    setLastCreatedPlayer(null);
+    try {
+      const result = await authedFetch('/api/admin/create-player', {
+        email: newPlayerEmail.trim(),
+        full_name: newPlayerName.trim(),
+        phone: newPlayerPhone.trim(),
+      });
+      setLastCreatedPlayer({
+        email: result.email,
+        player_uid: result.player_uid,
+        password: result.temp_password,
+      });
+      setNewPlayerName('');
+      setNewPlayerEmail('');
+      setNewPlayerPhone('');
+      notify('Player account created. Share login details securely.');
+    } catch (err: any) {
+      notify(err?.message || 'Could not create player.', 'error');
+    } finally {
+      setCreatingPlayer(false);
+    }
+  };
+
+  // ---------------- Tournaments monitor (owner) ----------------
+
+  const fetchTournamentsAdmin = useCallback(async () => {
+    setLoadingTournaments(true);
+    try {
+      const result = await authedFetch('/api/admin/tournaments', undefined, 'GET');
+      setTournamentRows((result.tournaments || []) as TournamentAdminRow[]);
+    } catch (err: any) {
+      notify(err?.message || 'Could not load tournaments.', 'error');
+    } finally {
+      setLoadingTournaments(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!isLoggedIn || !activeTab) return;
     if (activeTab === 'deposits') void fetchDeposits();
     if (activeTab === 'withdraws') void fetchWithdraws();
     if (activeTab === 'workers') void fetchWorkers();
-  }, [isLoggedIn, activeTab, fetchDeposits, fetchWithdraws, fetchWorkers]);
+    if (activeTab === 'tournaments') void fetchTournamentsAdmin();
+  }, [
+    isLoggedIn,
+    activeTab,
+    fetchDeposits,
+    fetchWithdraws,
+    fetchWorkers,
+    fetchTournamentsAdmin,
+  ]);
 
   const canSee = (role: string) => roles.includes(role) || roles.includes('owner');
 
@@ -540,7 +641,7 @@ export default function AdminPage() {
           </button>
         </div>
 
-        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           {canSee('deposit') && (
             <TabButton active={activeTab === 'deposits'} onClick={() => setActiveTab('deposits')}>
               Deposit
@@ -562,6 +663,22 @@ export default function AdminPage() {
             </TabButton>
           )}
           {roles.includes('owner') && (
+            <TabButton
+              active={activeTab === 'create_player'}
+              onClick={() => setActiveTab('create_player')}
+            >
+              Create Player
+            </TabButton>
+          )}
+          {roles.includes('owner') && (
+            <TabButton
+              active={activeTab === 'tournaments'}
+              onClick={() => setActiveTab('tournaments')}
+            >
+              Tournaments
+            </TabButton>
+          )}
+          {roles.includes('owner') && (
             <TabButton active={activeTab === 'workers'} onClick={() => setActiveTab('workers')}>
               Manage Workers
             </TabButton>
@@ -571,12 +688,10 @@ export default function AdminPage() {
         {/* DEPOSITS */}
         {activeTab === 'deposits' && canSee('deposit') && (
           <section className="flex flex-col gap-3">
-            {/* Manual diamond credit — for cases with no request row, e.g. cash handed
-                over in person, or any correction that needs to go straight in. */}
             <div className="rounded-2xl border border-yellow-500/30 bg-gray-900 p-4">
               <h2 className="mb-1 text-sm font-black text-yellow-300">MANUAL DIAMOND CREDIT</h2>
               <p className="mb-3 text-[11px] text-gray-400">
-                Directly add Red Diamonds to a player's account by UID — no request needed.
+                Directly add Red Diamonds to a player&apos;s account by UID — no request needed.
               </p>
               <form onSubmit={creditManualDiamonds} className="flex flex-col gap-2">
                 <input
@@ -736,7 +851,10 @@ export default function AdminPage() {
                       placeholder="Rejection reason (only needed if rejecting)"
                       value={rejectReasonDraft[String(req.id)] || ''}
                       onChange={(e) =>
-                        setRejectReasonDraft((prev) => ({ ...prev, [String(req.id)]: e.target.value }))
+                        setRejectReasonDraft((prev) => ({
+                          ...prev,
+                          [String(req.id)]: e.target.value,
+                        }))
                       }
                       className="w-full rounded-xl border border-gray-800 bg-black p-2 text-xs text-white outline-none"
                     />
@@ -828,18 +946,197 @@ export default function AdminPage() {
             {playerResult?.profile && (
               <div className="rounded-2xl border border-cyan-500/20 bg-gray-900 p-5">
                 <h3 className="mb-3 text-sm font-black text-cyan-300">
-                  {playerResult.profile.nickname || playerResult.profile.full_name || 'Player'}
+                  {playerResult.profile.nickname ||
+                    playerResult.profile.full_name ||
+                    'Player'}
                 </h3>
                 <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-                  <Stat label="Red Diamonds" value={playerResult.profile.red_diamonds} color="text-red-300" />
-                  <Stat label="White Diamonds" value={playerResult.profile.white_diamonds} color="text-cyan-300" />
-                  <Stat label="Winning Cash" value={`NPR ${playerResult.profile.winning_cash}`} color="text-green-300" />
-                  <Stat label="Deposit Requests" value={playerResult.deposit_count} color="text-yellow-300" />
-                  <Stat label="Withdraw Requests" value={playerResult.withdraw_count} color="text-pink-300" />
-                  <Stat label="Phone" value={playerResult.profile.mobile_number || playerResult.profile.phone || '—'} color="text-gray-300" />
+                  <Stat
+                    label="Red Diamonds"
+                    value={playerResult.profile.red_diamonds}
+                    color="text-red-300"
+                  />
+                  <Stat
+                    label="White Diamonds"
+                    value={playerResult.profile.white_diamonds}
+                    color="text-cyan-300"
+                  />
+                  <Stat
+                    label="Winning Cash"
+                    value={`NPR ${playerResult.profile.winning_cash}`}
+                    color="text-green-300"
+                  />
+                  <Stat
+                    label="Deposit Requests"
+                    value={playerResult.deposit_count}
+                    color="text-yellow-300"
+                  />
+                  <Stat
+                    label="Withdraw Requests"
+                    value={playerResult.withdraw_count}
+                    color="text-pink-300"
+                  />
+                  <Stat
+                    label="Phone"
+                    value={
+                      playerResult.profile.mobile_number ||
+                      playerResult.profile.phone ||
+                      '—'
+                    }
+                    color="text-gray-300"
+                  />
                 </div>
               </div>
             )}
+          </section>
+        )}
+
+        {/* CREATE PLAYER (owner) */}
+        {activeTab === 'create_player' && roles.includes('owner') && (
+          <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
+            <h2 className="mb-1 text-sm font-black text-cyan-300">CREATE PLAYER ACCOUNT</h2>
+            <p className="mb-4 text-[11px] text-gray-400">
+              Create a new player login (email + temp password + Game UID). Share details on
+              WhatsApp only once.
+            </p>
+            <form onSubmit={createPlayer} className="flex flex-col gap-3">
+              <input
+                type="text"
+                placeholder="Full name"
+                value={newPlayerName}
+                onChange={(e) => setNewPlayerName(e.target.value)}
+                required
+                className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+              />
+              <input
+                type="email"
+                placeholder="Player email / Gmail"
+                value={newPlayerEmail}
+                onChange={(e) => setNewPlayerEmail(e.target.value)}
+                required
+                className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+              />
+              <input
+                type="tel"
+                placeholder="Phone number"
+                value={newPlayerPhone}
+                onChange={(e) => setNewPlayerPhone(e.target.value)}
+                className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+              />
+              <button
+                type="submit"
+                disabled={creatingPlayer}
+                className="rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 py-3 text-xs font-black text-white disabled:opacity-50"
+              >
+                {creatingPlayer ? 'Creating…' : 'Create Player Account'}
+              </button>
+            </form>
+
+            {lastCreatedPlayer && (
+              <div className="mt-4 rounded-xl border border-green-500/40 bg-green-950/40 p-4">
+                <p className="text-xs text-green-300 font-bold">Account created — send to player:</p>
+                <p className="mt-2 text-xs text-gray-300">
+                  Email:{' '}
+                  <b className="select-all text-white">{lastCreatedPlayer.email}</b>
+                </p>
+                <p className="mt-1 text-xs text-gray-300">
+                  Game UID:{' '}
+                  <b className="select-all text-yellow-300">{lastCreatedPlayer.player_uid}</b>
+                </p>
+                <p className="mt-1 text-xs text-gray-300">Password:</p>
+                <p className="mt-0.5 select-all break-all text-lg font-black text-white">
+                  {lastCreatedPlayer.password}
+                </p>
+                <p className="mt-2 text-[10px] text-gray-400">
+                  Player logs in with email + password. UID is their Game ID.
+                </p>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* TOURNAMENTS MONITOR (owner) */}
+        {activeTab === 'tournaments' && roles.includes('owner') && (
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-black text-cyan-300">TOURNAMENT MONITOR</h2>
+              <button
+                onClick={() => void fetchTournamentsAdmin()}
+                className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold text-gray-200"
+              >
+                {loadingTournaments ? 'Refreshing…' : 'Refresh'}
+              </button>
+            </div>
+
+            {tournamentRows.length === 0 && !loadingTournaments && (
+              <div className="rounded-2xl border border-gray-800 bg-gray-900 py-10 text-center text-sm text-gray-500">
+                No tournaments found.
+              </div>
+            )}
+
+            {tournamentRows.map((t) => (
+              <article
+                key={t.id}
+                className="rounded-2xl border border-gray-800 bg-gray-900 p-4"
+              >
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-sm font-black text-cyan-300">
+                    {t.type_label} · {t.title}
+                  </span>
+                  <span className="rounded-md border border-yellow-500/30 bg-yellow-500/10 px-2 py-1 text-[10px] font-bold text-yellow-300">
+                    {t.status}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs text-gray-400 sm:grid-cols-4">
+                  <p>
+                    Joined: <b className="text-white">{t.joined_count}</b>
+                  </p>
+                  <p>
+                    Played: <b className="text-white">{t.played_count}</b>
+                  </p>
+                  <p>
+                    Fee: <b className="text-red-300">{t.entry_fee} 🔴</b>
+                  </p>
+                  <p>
+                    Pool: <b className="text-yellow-300">{t.prize_pool} 🔴</b>
+                  </p>
+                  <p className="col-span-2">Start: {formatDate(t.start_time)}</p>
+                  <p className="col-span-2">End: {formatDate(t.end_time)}</p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpandedTournamentId((id) => (id === t.id ? null : t.id))
+                  }
+                  className="mt-3 rounded-lg border border-gray-700 bg-black/40 px-3 py-2 text-[11px] font-bold text-gray-200"
+                >
+                  {expandedTournamentId === t.id ? 'Hide Top 10' : 'Show Top 10'}
+                </button>
+
+                {expandedTournamentId === t.id && (
+                  <div className="mt-3 flex flex-col gap-1.5">
+                    {t.top_ranks.length === 0 ? (
+                      <p className="text-[11px] text-gray-500">No scores submitted yet.</p>
+                    ) : (
+                      t.top_ranks.map((r) => (
+                        <div
+                          key={`${t.id}-${r.rank}-${r.user_id}`}
+                          className="flex items-center justify-between rounded-lg border border-gray-800 bg-black/40 px-3 py-2 text-xs"
+                        >
+                          <span className="font-bold text-yellow-300">#{r.rank}</span>
+                          <span className="flex-1 px-2 text-white truncate">
+                            {r.name}{' '}
+                            <span className="text-gray-500">({r.uid})</span>
+                          </span>
+                          <span className="font-black text-cyan-300">{r.score} pts</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </article>
+            ))}
           </section>
         )}
 
@@ -891,7 +1188,8 @@ export default function AdminPage() {
                     {lastCreatedWorker.password}
                   </p>
                   <p className="mt-2 text-[10px] text-gray-400">
-                    Send this login (email + password) to them over WhatsApp — it will not be shown again.
+                    Send this login (email + password) to them over WhatsApp — it will not be
+                    shown again.
                   </p>
                 </div>
               )}
@@ -966,4 +1264,3 @@ function Stat({ label, value, color }: { label: string; value: any; color: strin
     </div>
   );
 }
-

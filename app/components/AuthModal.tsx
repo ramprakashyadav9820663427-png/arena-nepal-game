@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import InstallAppButton from '@/components/InstallAppButton';
 
 type AuthModalProps = {
   isOpen: boolean;
@@ -249,15 +250,27 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
         </button>
 
         <div className="relative p-5 pt-6">
-          <div className="flex flex-col items-center text-center mb-5">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-yellow-400 via-orange-500 to-red-500 flex items-center justify-center text-2xl shadow-[0_0_24px_rgba(234,179,8,0.45)] mb-3">
-              👑
+          <div className="flex flex-col items-center text-center mb-4">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-yellow-400 via-orange-500 to-red-500 flex items-center justify-center text-2xl shadow-[0_0_24px_rgba(234,179,8,0.45)] mb-3 overflow-hidden">
+              <img
+                src="/arena-nepal-logo.jpg"
+                alt="Arena Nepal"
+                className="w-full h-full object-cover"
+              />
             </div>
             <h2 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-orange-400 to-red-400 tracking-wide">
               ARENA NEPAL
             </h2>
             <p className="text-[11px] text-gray-400 mt-1">
               {authMode === 'login' ? 'Sign in to play & win' : 'Create your arena account'}
+            </p>
+          </div>
+
+          {/* Install App — before login */}
+          <div className="mb-4">
+            <InstallAppButton />
+            <p className="mt-1.5 text-center text-[9px] text-gray-500">
+              Add to Home Screen for faster play
             </p>
           </div>
 
@@ -442,7 +455,6 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
             </button>
           </form>
 
-          {/* Support box — no forgot password */}
           <div className="mt-4 rounded-2xl border border-green-500/30 bg-green-500/5 p-3.5">
             <p className="text-[11px] text-gray-300 leading-relaxed text-center">
               Login problem? Forgot password? Register issue?
