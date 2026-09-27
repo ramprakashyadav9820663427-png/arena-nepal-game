@@ -121,6 +121,9 @@ export default function WalletSection({
 
   const redToCashInFlightRef = useRef(false);
   const cashToRedInFlightRef = useRef(false);
+  const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(
+    null
+  );
 
   const notify = (text: string) => {
     setMessage(text);
@@ -212,9 +215,7 @@ export default function WalletSection({
       if (error) throw error;
 
       if (profile) {
-        setUserName(
-          profile.nickname || profile.full_name || 'New Player'
-        );
+        setUserName(profile.nickname || profile.full_name || 'New Player');
 
         setUserMobile(
           profile.mobile_number || profile.phone || 'No Mobile Added'
@@ -289,30 +290,42 @@ export default function WalletSection({
   useEffect(() => {
     if (wallet) {
       if (typeof wallet.redDiamonds === 'number') setRedDiamonds(wallet.redDiamonds);
-      if (typeof wallet.whiteDiamonds === 'number') setWhiteDiamonds(wallet.whiteDiamonds);
+      if (typeof wallet.whiteDiamonds === 'number')
+        setWhiteDiamonds(wallet.whiteDiamonds);
       if (typeof wallet.winningCash === 'number') setWinningCash(wallet.winningCash);
     }
   }, [wallet]);
 
   useEffect(() => {
-    let realtimeChannel: ReturnType<typeof supabase.channel> | null = null;
     let isMounted = true;
 
-    const setupRealtime = (userId: string) => {
-      if (realtimeChannel) {
-        supabase.removeChannel(realtimeChannel);
-        realtimeChannel = null;
+    const tearDownRealtime = () => {
+      const ch = realtimeChannelRef.current;
+      if (ch) {
+        try {
+          supabase.removeChannel(ch);
+        } catch {
+          // ignore
+        }
+        realtimeChannelRef.current = null;
       }
+    };
 
-      realtimeChannel = supabase
-        .channel(`wallet-profile:${userId}`)
+    const setupRealtime = (profileUserId: string) => {
+      tearDownRealtime();
+
+      // Unique name every time → avoids "callbacks after subscribe" on reused channel
+      const channelName = `wallet-profile:${profileUserId}:${Date.now()}`;
+
+      const channel = supabase
+        .channel(channelName)
         .on(
           'postgres_changes',
           {
             event: 'UPDATE',
             schema: 'public',
             table: 'profiles',
-            filter: `id=eq.${userId}`,
+            filter: `id=eq.${profileUserId}`,
           },
           (payload) => {
             if (!isMounted) return;
@@ -333,11 +346,15 @@ export default function WalletSection({
             applyBalances(red, white, cash);
 
             if (typeof row.bonus_taken === 'boolean') setBonusTaken(row.bonus_taken);
-            if (typeof row.turnover_required === 'number') setTurnoverRequired(row.turnover_required);
-            if (typeof row.turnover_completed === 'number') setTurnoverCompleted(row.turnover_completed);
+            if (typeof row.turnover_required === 'number')
+              setTurnoverRequired(row.turnover_required);
+            if (typeof row.turnover_completed === 'number')
+              setTurnoverCompleted(row.turnover_completed);
           }
         )
         .subscribe();
+
+      realtimeChannelRef.current = channel;
     };
 
     const init = async () => {
@@ -352,13 +369,23 @@ export default function WalletSection({
       }
     };
 
-    init();
+    void init();
 
     const onWalletUpdate = (e: Event) => {
       const custom = e as CustomEvent;
 
       if (custom.detail && typeof custom.detail === 'object') {
-        const { redDiamonds: r, whiteDiamonds: w, winningCash: c, balance } = custom.detail;
+        const {
+          redDiamonds: r,
+          whiteDiamonds: w,
+          winningCash: c,
+          balance,
+        } = custom.detail as {
+          redDiamonds?: number;
+          whiteDiamonds?: number;
+          winningCash?: number;
+          balance?: number;
+        };
 
         if (typeof r === 'number') setRedDiamonds(r);
         if (typeof w === 'number') setWhiteDiamonds(w);
@@ -384,10 +411,7 @@ export default function WalletSection({
         await fetchUserData();
         setupRealtime(newSession.user.id);
       } else {
-        if (realtimeChannel) {
-          supabase.removeChannel(realtimeChannel);
-          realtimeChannel = null;
-        }
+        tearDownRealtime();
         applyBalances(0, 0, 0);
       }
     });
@@ -397,9 +421,7 @@ export default function WalletSection({
       window.removeEventListener('walletUpdated', onWalletUpdate);
       window.removeEventListener('storage', onWalletUpdate);
       subscription.unsubscribe();
-      if (realtimeChannel) {
-        supabase.removeChannel(realtimeChannel);
-      }
+      tearDownRealtime();
     };
   }, [fetchUserData, applyBalances]);
 
@@ -414,9 +436,7 @@ export default function WalletSection({
 
   const openProfileModal = () => {
     setInputName(userName === 'New Player' ? '' : userName);
-    setInputMobile(
-      userMobile === 'No Mobile Added' ? '' : userMobile
-    );
+    setInputMobile(userMobile === 'No Mobile Added' ? '' : userMobile);
     setShowProfileModal(true);
   };
 
@@ -472,16 +492,14 @@ export default function WalletSection({
     }
 
     try {
-      const { error } = await supabase
-        .from('deposit_requests')
-        .insert({
-          user_uid: gameUid,
-          user_name: userName,
-          package_diamonds: diamonds,
-          amount: price,
-          payment_method: depositMethod,
-          status: 'Pending',
-        });
+      const { error } = await supabase.from('deposit_requests').insert({
+        user_uid: gameUid,
+        user_name: userName,
+        package_diamonds: diamonds,
+        amount: price,
+        payment_method: depositMethod,
+        status: 'Pending',
+      });
 
       if (error) throw error;
 
@@ -494,20 +512,17 @@ Payment Method: ${depositMethod}
 Hello Team, I have created a deposit request in the app. Please share payment details / QR code so I can send the payment screenshot.`;
 
       window.open(
-        'https://wa.me/' + SUPPORT_NUMBER + '?text=' +
+        'https://wa.me/' +
+          SUPPORT_NUMBER +
+          '?text=' +
           encodeURIComponent(messageText),
         '_blank'
       );
 
-      notify(
-        'Deposit request created! Opening WhatsApp for payment...'
-      );
+      notify('Deposit request created! Opening WhatsApp for payment...');
     } catch (error: any) {
       console.error('Deposit request submission failed:', error);
-      notify(
-        error?.message ||
-          'Deposit request failed. Please try again.'
-      );
+      notify(error?.message || 'Deposit request failed. Please try again.');
     }
   };
 
@@ -553,9 +568,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
     }
   };
 
-  const submitWithdrawalRequest = async (
-    event: React.FormEvent
-  ) => {
+  const submitWithdrawalRequest = async (event: React.FormEvent) => {
     event.preventDefault();
 
     if (busy) return;
@@ -567,11 +580,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
     const amount = Number(withdrawAmount);
 
-    if (
-      !Number.isInteger(amount) ||
-      amount < 500 ||
-      amount > 10000
-    ) {
+    if (!Number.isInteger(amount) || amount < 500 || amount > 10000) {
       notify('Withdrawal amount must be NPR 500–10,000.');
       return;
     }
@@ -581,10 +590,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
       return;
     }
 
-    if (
-      !withdrawAccountNo.trim() ||
-      !withdrawAccountName.trim()
-    ) {
+    if (!withdrawAccountNo.trim() || !withdrawAccountName.trim()) {
       notify('Please enter account details.');
       return;
     }
@@ -594,11 +600,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
       return;
     }
 
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png',
-      'image/webp',
-    ];
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
 
     if (!allowedTypes.includes(withdrawQrImage.type)) {
       notify('Please upload a JPG, PNG, or WebP image.');
@@ -617,20 +619,18 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         withdrawQrImage.type === 'image/png'
           ? 'png'
           : withdrawQrImage.type === 'image/webp'
-          ? 'webp'
-          : 'jpg';
+            ? 'webp'
+            : 'jpg';
 
-      const filePath =
-        `${userId}/${crypto.randomUUID()}.${extension}`;
+      const filePath = `${userId}/${crypto.randomUUID()}.${extension}`;
 
-      const { data: uploadData, error: uploadError } =
-        await supabase.storage
-          .from('withdraw-qr')
-          .upload(filePath, withdrawQrImage, {
-            contentType: withdrawQrImage.type,
-            cacheControl: '3600',
-            upsert: false,
-          });
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('withdraw-qr')
+        .upload(filePath, withdrawQrImage, {
+          contentType: withdrawQrImage.type,
+          cacheControl: '3600',
+          upsert: false,
+        });
 
       if (uploadError) throw uploadError;
 
@@ -661,10 +661,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
     } catch (error: any) {
       console.error('Withdrawal submission failed:', error);
 
-      notify(
-        error?.message ||
-          'Withdrawal request failed. Please try again.'
-      );
+      notify(error?.message || 'Withdrawal request failed. Please try again.');
     } finally {
       setBusy(false);
     }
@@ -805,7 +802,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
 
   return (
     <div className="flex w-full flex-col gap-4 pb-6">
-      {/* Profile Header + Settings */}
       <section className="rounded-2xl border border-yellow-500/30 bg-gradient-to-br from-gray-900 via-gray-950 to-black p-4 shadow-xl">
         <div className="mb-3 flex items-start justify-between">
           <div>
@@ -992,9 +988,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
                     </p>
                   </div>
                   <button
-                    onClick={() =>
-                      handleDeposit(pkg.diamonds, pkg.price)
-                    }
+                    onClick={() => handleDeposit(pkg.diamonds, pkg.price)}
                     className="shrink-0 rounded-lg bg-green-600 px-3 py-2 text-[10px] font-bold text-white transition hover:bg-green-500"
                   >
                     Request
@@ -1090,17 +1084,15 @@ Hello Team, I have created a deposit request in the app. Please share payment de
                           item.status?.toLowerCase() === 'approved'
                             ? 'bg-green-500/20 text-green-400'
                             : item.status?.toLowerCase() === 'rejected'
-                            ? 'bg-red-500/20 text-red-400'
-                            : 'bg-yellow-500/20 text-yellow-400'
+                              ? 'bg-red-500/20 text-red-400'
+                              : 'bg-yellow-500/20 text-yellow-400'
                         }`}
                       >
                         {item.status}
                       </span>
                     </div>
                     <p className="text-gray-200">{item.details}</p>
-                    <p className="mt-1 text-[9px] text-gray-500">
-                      {item.date}
-                    </p>
+                    <p className="mt-1 text-[9px] text-gray-500">{item.date}</p>
                   </div>
                 ))}
               </div>
@@ -1112,12 +1104,10 @@ Hello Team, I have created a deposit request in the app. Please share payment de
           <section className="flex w-full flex-col gap-4 rounded-2xl border-2 border-pink-500/60 bg-gradient-to-br from-purple-950 via-gray-900 to-indigo-950 p-4 shadow-2xl">
             <div className="text-center">
               <span className="text-3xl">🤝</span>
-              <h3 className="mt-1 text-xs font-black uppercase">
-                Refer Friends
-              </h3>
+              <h3 className="mt-1 text-xs font-black uppercase">Refer Friends</h3>
               <p className="mt-1 text-[10px] text-gray-300">
-                Share your referral link. Any reward or commission is subject
-                to the referral system being configured and approved.
+                Share your referral link. Any reward or commission is subject to
+                the referral system being configured and approved.
               </p>
             </div>
 
@@ -1141,9 +1131,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
             </div>
 
             <div className="rounded-xl border border-yellow-500/20 bg-black/40 p-3 text-[10px] text-gray-300">
-              <p className="mb-1 font-bold text-yellow-400">
-                How it works
-              </p>
+              <p className="mb-1 font-bold text-yellow-400">How it works</p>
               <p>1. Copy and share your referral link.</p>
               <p>2. Your friend registers using the link.</p>
               <p>
@@ -1155,7 +1143,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         )}
       </>
 
-      {/* WITHDRAW MODAL */}
       {showWithdrawModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/80 p-4 backdrop-blur-sm">
           <div className="my-auto w-full max-w-sm rounded-2xl border border-green-500/50 bg-gray-900 p-4 shadow-2xl">
@@ -1245,9 +1232,9 @@ Hello Team, I have created a deposit request in the app. Please share payment de
               </label>
 
               <div className="rounded-xl border border-yellow-500/30 bg-yellow-950/20 p-2 text-[10px] text-yellow-200">
-                Your request will be verified by the platform. The server
-                checks your available winning cash and creates the request.
-                A rejected request requires a secure admin refund.
+                Your request will be verified by the platform. The server checks
+                your available winning cash and creates the request. A rejected
+                request requires a secure admin refund.
               </div>
 
               <button
@@ -1262,7 +1249,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       )}
 
-      {/* RED TO CASH MODAL */}
       {showExchangeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-red-500/50 bg-gray-900 p-4 shadow-2xl">
@@ -1304,7 +1290,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       )}
 
-      {/* CASH TO RED MODAL */}
       {showCashToRedModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-cyan-500/50 bg-gray-900 p-4 shadow-2xl">
@@ -1346,7 +1331,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       )}
 
-      {/* PROFILE MODAL */}
       {showProfileModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-purple-500/50 bg-gray-900 p-4 shadow-2xl">
@@ -1362,10 +1346,7 @@ Hello Team, I have created a deposit request in the app. Please share payment de
               </button>
             </div>
 
-            <form
-              onSubmit={saveProfile}
-              className="flex flex-col gap-3 text-xs"
-            >
+            <form onSubmit={saveProfile} className="flex flex-col gap-3 text-xs">
               <label className="text-[10px] font-bold text-gray-400">
                 Full Name
                 <input
@@ -1406,7 +1387,6 @@ Hello Team, I have created a deposit request in the app. Please share payment de
         </div>
       )}
 
-      {/* SETTINGS (separate component) */}
       {showSettings && (
         <SettingsSection onClose={() => setShowSettings(false)} />
       )}

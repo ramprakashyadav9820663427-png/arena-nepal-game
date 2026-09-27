@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import InstallAppButton from '@/components/InstallAppButton';
 
 type SettingsSectionProps = {
   onClose: () => void;
@@ -34,7 +35,6 @@ export default function SettingsSection({ onClose }: SettingsSectionProps) {
     try {
       await supabase.auth.signOut();
       onClose();
-      // page.tsx auth listener will show login modal
     } catch (err) {
       console.error('Logout failed:', err);
       alert('Logout failed. Please try again.');
@@ -46,7 +46,6 @@ export default function SettingsSection({ onClose }: SettingsSectionProps) {
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
       <div className="relative w-full max-w-sm rounded-3xl border border-cyan-500/40 bg-gradient-to-b from-gray-900 via-black to-gray-950 p-5 shadow-[0_0_50px_rgba(34,211,238,0.15)]">
-        {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-sm font-black uppercase tracking-wide text-cyan-300">
             ⚙️ Settings
@@ -59,7 +58,14 @@ export default function SettingsSection({ onClose }: SettingsSectionProps) {
           </button>
         </div>
 
-        {/* Support */}
+        {/* Install App */}
+        <div className="mb-3 rounded-2xl border border-cyan-500/30 bg-cyan-950/20 p-3">
+          <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-cyan-300">
+            App
+          </p>
+          <InstallAppButton />
+        </div>
+
         <div className="mb-3 rounded-2xl border border-green-500/30 bg-green-950/30 p-3">
           <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-green-400">
             Support
@@ -80,7 +86,6 @@ export default function SettingsSection({ onClose }: SettingsSectionProps) {
           </a>
         </div>
 
-        {/* Social links */}
         <div className="mb-3 rounded-2xl border border-purple-500/30 bg-purple-950/20 p-3">
           <p className="mb-2 text-[10px] font-black uppercase tracking-wider text-purple-300">
             Follow Arena Nepal
@@ -115,7 +120,6 @@ export default function SettingsSection({ onClose }: SettingsSectionProps) {
           </div>
         </div>
 
-        {/* Logout at bottom */}
         <button
           onClick={handleLogout}
           disabled={loggingOut}

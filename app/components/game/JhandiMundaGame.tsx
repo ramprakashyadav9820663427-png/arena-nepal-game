@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   getGlobalBalance,
   updateGlobalBalance,
 } from '@/lib/wallet';
+import { supabase } from '@/lib/supabase';
 
 type SymbolId =
   | 'club'
@@ -23,6 +24,8 @@ type SymbolInfo = {
   color: string;
   svgIcon: React.ReactNode;
 };
+
+const GAME_KEY = 'jhandimunda';
 
 const SYMBOLS: SymbolInfo[] = [
   {
@@ -146,8 +149,8 @@ export default function JhandiMundaGame() {
   const [dice, setDice] = useState<SymbolId[]>([]);
   const [rollingDice, setRollingDice] = useState<SymbolId[]>([]);
   const [message, setMessage] = useState('');
-  
-  // विनिंग पॉपअप के लिए डीटेल स्टेट (कौन सा सिंबल कितनी बार आया)
+  const [busy, setBusy] = useState(false);
+
   const [winPopupData, setWinPopupData] = useState<{
     totalWon: number;
     breakdown: { name: string; count: number; color: string }[];
@@ -161,10 +164,7 @@ export default function JhandiMundaGame() {
   const resultProcessedRef = useRef(false);
   const historyRef = useRef<{ symbol: SymbolId; amount: number }[]>([]);
 
-  const totalBet = Object.values(bets).reduce(
-    (sum, value) => sum + value,
-    0
-  );
+  const totalBet = Object.values(bets).reduce((sum, value) => sum + value, 0);
 
   const counts = countSymbols(dice);
   const isChhakka =
@@ -174,6 +174,76 @@ export default function JhandiMundaGame() {
   useEffect(() => {
     betsRef.current = bets;
   }, [bets]);
+
+  const applyBalance = useCallback((next: number) => {
+    const n = Math.max(0, Math.floor(Number(next) || 0));
+    balanceRef.current = n;
+    setBalance(n);
+    updateGlobalBalance(n);
+  }, []);
+
+  const loadBalanceFromServer = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        const local = getGlobalBalance();
+        balanceRef.current = local;
+        setBalance(local);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('red_diamonds')
+        .eq('id', session.user.id)
+        .single();
+      if (error || data == null) {
+        const local = getGlobalBalance();
+        balanceRef.current = local;
+        setBalance(local);
+        return;
+      }
+      applyBalance(data.red_diamonds ?? 0);
+    } catch {
+      const local = getGlobalBalance();
+      balanceRef.current = local;
+      setBalance(local);
+    }
+  }, [applyBalance]);
+
+  const deductRed = async (amount: number): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.rpc('game_deduct_red', {
+        p_amount: amount,
+        p_game_key: GAME_KEY,
+      });
+      if (error) throw error;
+      applyBalance(typeof data === 'number' ? data : balanceRef.current - amount);
+      return true;
+    } catch (err) {
+      console.error('jhandi deduct failed', err);
+      void loadBalanceFromServer();
+      return false;
+    }
+  };
+
+  const creditRed = async (amount: number): Promise<boolean> => {
+    if (amount <= 0) return true;
+    try {
+      const { data, error } = await supabase.rpc('game_credit_red', {
+        p_amount: amount,
+        p_game_key: GAME_KEY,
+      });
+      if (error) throw error;
+      applyBalance(typeof data === 'number' ? data : balanceRef.current + amount);
+      return true;
+    } catch (err) {
+      console.error('jhandi credit failed', err);
+      void loadBalanceFromServer();
+      return false;
+    }
+  };
 
   const getAudioContext = () => {
     if (typeof window === 'undefined') return null;
@@ -259,11 +329,8 @@ export default function JhandiMundaGame() {
     }
   };
 
-  // ========== GLOBAL BALANCE SYNC ==========
   useEffect(() => {
-    const initial = getGlobalBalance();
-    balanceRef.current = initial;
-    setBalance(initial);
+    void loadBalanceFromServer();
 
     const syncBalance = (event: Event) => {
       const custom = event as CustomEvent;
@@ -294,7 +361,7 @@ export default function JhandiMundaGame() {
         void audioRef.current.close();
       }
     };
-  }, []);
+  }, [loadBalanceFromServer]);
 
   useEffect(() => {
     if (phase !== 'betting') return;
@@ -337,9 +404,7 @@ export default function JhandiMundaGame() {
 
     const startAnimation = window.setTimeout(() => {
       animationInterval = window.setInterval(() => {
-        setRollingDice(
-          Array.from({ length: 6 }, () => randomSymbol())
-        );
+        setRollingDice(Array.from({ length: 6 }, () => randomSymbol()));
         playTone(160 + Math.random() * 180, 0.07, 'triangle', 0.025);
       }, 200);
     }, 0);
@@ -349,10 +414,7 @@ export default function JhandiMundaGame() {
         window.clearInterval(animationInterval);
       }
 
-      const finalDice = Array.from(
-        { length: 6 },
-        () => randomSymbol()
-      );
+      const finalDice = Array.from({ length: 6 }, () => randomSymbol());
 
       setDice(finalDice);
       setRollingDice(finalDice);
@@ -374,9 +436,9 @@ export default function JhandiMundaGame() {
       if (!chhakka) {
         SYMBOLS.forEach((symbol) => {
           const matchedCount = resultCounts[symbol.id];
-          // नियम: 2 या उससे ज़्यादा आने पर ही payout मिलेगा और यूजर की बेट पर विचार होगा
           if (matchedCount >= 2 && currentBets[symbol.id] > 0) {
-            payout += currentBets[symbol.id] * matchedCount + currentBets[symbol.id];
+            payout +=
+              currentBets[symbol.id] * matchedCount + currentBets[symbol.id];
             winBreakdown.push({
               name: symbol.name,
               count: matchedCount,
@@ -386,12 +448,10 @@ export default function JhandiMundaGame() {
         });
       }
 
-      const resultMessage = SYMBOLS
-        .filter((symbol) => resultCounts[symbol.id] > 0)
-        .map(
-          (symbol) =>
-            `${resultCounts[symbol.id]} ${symbol.name}`
-        )
+      const resultMessage = SYMBOLS.filter(
+        (symbol) => resultCounts[symbol.id] > 0
+      )
+        .map((symbol) => `${resultCounts[symbol.id]} ${symbol.name}`)
         .join(' · ');
 
       if (currentTotal === 0) {
@@ -400,25 +460,19 @@ export default function JhandiMundaGame() {
         setMessage(`छक्का! सभी सिंबल अलग हैं · सभी बेट हार गए`);
       } else if (payout > 0) {
         setMessage(`जीत: ${resultMessage} · +♦ ${formatNumber(payout)}`);
-        // पॉपअप में दिखाने के लिए डेटा तैयार करें
         setWinPopupData({
           totalWon: payout,
           breakdown: winBreakdown,
         });
       } else {
-        setMessage(`नतीजा: ${resultMessage} · 1 या कम मैच होने पर बेट हार गए`);
+        setMessage(
+          `नतीजा: ${resultMessage} · 1 या कम मैच होने पर बेट हार गए`
+        );
       }
 
-      if (
-        !resultProcessedRef.current &&
-        payout > 0
-      ) {
+      if (!resultProcessedRef.current && payout > 0) {
         resultProcessedRef.current = true;
-        // Global sync: absolute new balance
-        const newBalance = balanceRef.current + payout;
-        updateGlobalBalance(newBalance);
-        balanceRef.current = newBalance;
-        setBalance(newBalance);
+        void creditRed(Math.floor(payout));
       }
 
       playResultSound(payout > 0);
@@ -432,6 +486,7 @@ export default function JhandiMundaGame() {
         window.clearInterval(animationInterval);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
 
   useEffect(() => {
@@ -443,13 +498,14 @@ export default function JhandiMundaGame() {
   }, [phase]);
 
   const bettingLocked =
-    phase !== 'betting' ||
-    timer <= LOCK_AT_SECONDS;
+    phase !== 'betting' || timer <= LOCK_AT_SECONDS || busy;
 
-  const placeBet = (symbol: SymbolId) => {
+  const placeBet = async (symbol: SymbolId) => {
     try {
       getAudioContext();
-    } catch {}
+    } catch {
+      // ignore
+    }
 
     if (bettingLocked) return;
 
@@ -459,11 +515,15 @@ export default function JhandiMundaGame() {
       return;
     }
 
-    // Global sync: deduct bet
-    const newBalance = balanceRef.current - selectedAmount;
-    updateGlobalBalance(newBalance);
-    balanceRef.current = newBalance;
-    setBalance(newBalance);
+    setBusy(true);
+    const ok = await deductRed(selectedAmount);
+    setBusy(false);
+
+    if (!ok) {
+      setMessage('बेट फेल · Red Diamonds चेक करें');
+      playTone(180, 0.2, 'square', 0.05);
+      return;
+    }
 
     const nextBets = {
       ...betsRef.current,
@@ -478,46 +538,54 @@ export default function JhandiMundaGame() {
       amount: selectedAmount,
     });
 
-    setMessage(`${formatNumber(selectedAmount)} ♦ · ${symbol.toUpperCase()} पर लगाया गया`);
+    setMessage(
+      `${formatNumber(selectedAmount)} ♦ · ${symbol.toUpperCase()} पर लगाया गया`
+    );
     playBetSound();
   };
 
-  const undoBet = () => {
+  const undoBet = async () => {
     if (bettingLocked) return;
     const last = historyRef.current.pop();
     if (!last) return;
 
+    setBusy(true);
+    const ok = await creditRed(last.amount);
+    setBusy(false);
+
+    if (!ok) {
+      historyRef.current.push(last);
+      setMessage('Undo फेल · फिर कोशिश करें');
+      return;
+    }
+
     const nextBets = {
       ...betsRef.current,
-      [last.symbol]: Math.max(
-        0,
-        betsRef.current[last.symbol] - last.amount
-      ),
+      [last.symbol]: Math.max(0, betsRef.current[last.symbol] - last.amount),
     };
 
     betsRef.current = nextBets;
     setBets(nextBets);
 
-    // Global sync: refund
-    const newBalance = balanceRef.current + last.amount;
-    updateGlobalBalance(newBalance);
-    balanceRef.current = newBalance;
-    setBalance(newBalance);
-
     setMessage('आखिरी बेट हटाई गई और पैसे वापस किए गए');
     playTone(400, 0.08, 'triangle');
   };
 
-  const clearBets = () => {
+  const clearBets = async () => {
     if (bettingLocked) return;
-    
-    const totalCurrentBets = Object.values(betsRef.current).reduce((a, b) => a + b, 0);
+
+    const totalCurrentBets = Object.values(betsRef.current).reduce(
+      (a, b) => a + b,
+      0
+    );
     if (totalCurrentBets > 0) {
-      // Global sync: refund all
-      const newBalance = balanceRef.current + totalCurrentBets;
-      updateGlobalBalance(newBalance);
-      balanceRef.current = newBalance;
-      setBalance(newBalance);
+      setBusy(true);
+      const ok = await creditRed(totalCurrentBets);
+      setBusy(false);
+      if (!ok) {
+        setMessage('Clear फेल · फिर कोशिश करें');
+        return;
+      }
     }
 
     const empty = { ...EMPTY_BETS };
@@ -804,7 +872,6 @@ export default function JhandiMundaGame() {
           100% { transform: translate(0, 0) rotate(-2deg); }
         }
 
-        /* विनिंग पॉपअप स्टाइल्स (डिटेल के साथ) */
         .jm-win-popup {
           position: absolute;
           z-index: 20;
@@ -1007,7 +1074,6 @@ export default function JhandiMundaGame() {
         }
       `}</style>
 
-      {/* HEADER */}
       <header className="jm-panel jm-header">
         <div>
           <div className="jm-title">JHANDI MUNDA</div>
@@ -1022,16 +1088,29 @@ export default function JhandiMundaGame() {
         </div>
       </header>
 
-      {/* TIMER & STATUS */}
       <div className="jm-panel jm-timer">
         <div>
           <div className="jm-muted">
-            {phase === 'betting' && (timer <= LOCK_AT_SECONDS ? 'बेटिंग लॉक हो रही है' : 'बेटिंग चालू है')}
+            {phase === 'betting' &&
+              (timer <= LOCK_AT_SECONDS
+                ? 'बेटिंग लॉक हो रही है'
+                : 'बेटिंग चालू है')}
             {phase === 'shaking' && 'डोल हिल रहा है'}
-            {phase === 'result' && (isChhakka ? 'छक्का! (All Unique)' : 'नतीजा घोषित (5s)')}
+            {phase === 'result' &&
+              (isChhakka ? 'छक्का! (All Unique)' : 'नतीजा घोषित (5s)')}
           </div>
-          <div className={`jm-timer-number ${timer <= LOCK_AT_SECONDS && phase === 'betting' ? 'jm-warning' : ''}`}>
-            {phase === 'betting' ? `${timer}s` : phase === 'shaking' ? `${shakeTimer}s` : 'OK'}
+          <div
+            className={`jm-timer-number ${
+              timer <= LOCK_AT_SECONDS && phase === 'betting'
+                ? 'jm-warning'
+                : ''
+            }`}
+          >
+            {phase === 'betting'
+              ? `${timer}s`
+              : phase === 'shaking'
+                ? `${shakeTimer}s`
+                : 'OK'}
           </div>
         </div>
 
@@ -1043,7 +1122,6 @@ export default function JhandiMundaGame() {
         </div>
       </div>
 
-      {/* SYMBOLS COUNT STRIP */}
       <div className="jm-symbol-strip">
         {SYMBOLS.map((sym) => (
           <div key={sym.id} className="jm-symbol-count">
@@ -1057,11 +1135,9 @@ export default function JhandiMundaGame() {
         ))}
       </div>
 
-      {/* TABLE & CUP AREA */}
       <div className="jm-table">
         <div className="jm-table-label">ARENA NEPAL · JHANDI MUNDA TABLE</div>
 
-        {/* 6 DICE CARDS GRID */}
         <div className="jm-dice-grid">
           {currentDice.slice(0, 6).map((symbolId, index) => {
             const sym = SYMBOLS.find((s) => s.id === symbolId) || SYMBOLS[0];
@@ -1076,14 +1152,10 @@ export default function JhandiMundaGame() {
           })}
           {currentDice.length === 0 &&
             Array.from({ length: 6 }).map((_, index) => (
-              <div
-                key={index}
-                className="jm-card-item opacity-25"
-              />
+              <div key={index} className="jm-card-item opacity-25" />
             ))}
         </div>
 
-        {/* CUP STAGE */}
         {phase !== 'result' && (
           <div className="jm-cup-stage">
             <div
@@ -1100,17 +1172,18 @@ export default function JhandiMundaGame() {
           </div>
         )}
 
-        {/* WINNING POPUP MESSAGE WITH BREAKDOWN */}
         {phase === 'result' && winPopupData && (
           <div className="jm-win-popup">
             <div className="jm-win-box">
               <div className="jm-win-title">🎉 शानदार जीत! 🎉</div>
-              
+
               <div className="jm-win-breakdown">
                 {winPopupData.breakdown.map((item, idx) => (
                   <div key={idx} className="jm-breakdown-row">
                     <span>{item.name}:</span>
-                    <span style={{ color: '#facc15' }}>{item.count} बार आया ({item.count}x)</span>
+                    <span style={{ color: '#facc15' }}>
+                      {item.count} बार आया ({item.count}x)
+                    </span>
                   </div>
                 ))}
               </div>
@@ -1125,23 +1198,30 @@ export default function JhandiMundaGame() {
 
       {message && <div className="jm-message">{message}</div>}
 
-      {/* BETTING BOARD */}
       <div className="jm-panel p-3 mt-2">
-        <div className="text-xs font-bold text-amber-300">निशान पर क्लिक करके तुरंत दांव लगाएं</div>
+        <div className="text-xs font-bold text-amber-300">
+          निशान पर क्लिक करके तुरंत दांव लगाएं
+        </div>
         <div className="jm-bet-grid">
           {SYMBOLS.map((sym) => {
             const hasBet = bets[sym.id] > 0;
-            const isWon = phase === 'result' && !isChhakka && counts[sym.id] >= 2;
-            const isLost = phase === 'result' && (isChhakka || counts[sym.id] < 2) && hasBet;
+            const isWon =
+              phase === 'result' && !isChhakka && counts[sym.id] >= 2;
+            const isLost =
+              phase === 'result' &&
+              (isChhakka || counts[sym.id] < 2) &&
+              hasBet;
 
             return (
               <button
                 key={sym.id}
-                onClick={() => placeBet(sym.id)}
+                onClick={() => void placeBet(sym.id)}
                 disabled={bettingLocked}
                 className={`jm-bet-card ${hasBet ? 'selected' : ''}`}
               >
-                {isWon && <span className="jm-badge-win">✓ {counts[sym.id]}x</span>}
+                {isWon && (
+                  <span className="jm-badge-win">✓ {counts[sym.id]}x</span>
+                )}
                 {isLost && <span className="jm-badge-loss">✕</span>}
 
                 <div className="jm-bet-symbol" style={{ color: sym.color }}>
@@ -1157,7 +1237,6 @@ export default function JhandiMundaGame() {
         </div>
       </div>
 
-      {/* DENOMINATIONS */}
       <div className="jm-panel jm-denominations">
         <div className="text-xs font-bold text-amber-300">चिप की रकम चुनें</div>
         <div className="jm-denom-grid">
@@ -1166,7 +1245,9 @@ export default function JhandiMundaGame() {
               key={amount}
               onClick={() => setSelectedAmount(amount)}
               disabled={bettingLocked}
-              className={`jm-denom ${selectedAmount === amount ? 'active' : ''}`}
+              className={`jm-denom ${
+                selectedAmount === amount ? 'active' : ''
+              }`}
             >
               ♦ {formatNumber(amount)}
             </button>
@@ -1174,18 +1255,17 @@ export default function JhandiMundaGame() {
         </div>
       </div>
 
-      {/* CONTROLS */}
       <div className="jm-panel p-3 mt-2">
         <div className="jm-controls">
           <button
-            onClick={undoBet}
+            onClick={() => void undoBet()}
             disabled={bettingLocked || historyRef.current.length === 0}
             className="jm-control"
           >
             अंडू (Undo)
           </button>
           <button
-            onClick={clearBets}
+            onClick={() => void clearBets()}
             disabled={bettingLocked || totalBet === 0}
             className="jm-control"
           >
@@ -1195,7 +1275,7 @@ export default function JhandiMundaGame() {
       </div>
 
       <div className="jm-footnote text-center text-xs mt-3 text-gray-400">
-        Arena Nepal · Virtual Game · No cash withdrawal
+        Arena Nepal · Server wallet synced
       </div>
     </main>
   );

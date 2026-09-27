@@ -1,58 +1,121 @@
 'use client';
-import React, { useState, useEffect, useRef } from 'react';
-import { getWalletBalance, updateWalletBalance } from '@/lib/wallet';
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { getGlobalBalance, updateGlobalBalance } from '@/lib/wallet';
+import { supabase } from '@/lib/supabase';
 
 interface RocketCrashGameProps {
   onBackToLobby?: () => void;
 }
 
+const GAME_KEY = 'rocketcrash';
+
 export default function RocketCrashGame({ onBackToLobby }: RocketCrashGameProps) {
-  const [gameState, setGameState] = useState<'WAITING' | 'FLYING' | 'CASHED_OUT' | 'CRASHED'>('WAITING');
-  const [waitTime, setWaitTime] = useState<number>(10); // Changed to 10 seconds auto-timer
-  const [redDiamonds, setRedDiamonds] = useState<number>(1000);
-  
+  const [gameState, setGameState] = useState<
+    'WAITING' | 'FLYING' | 'CASHED_OUT' | 'CRASHED'
+  >('WAITING');
+  const [waitTime, setWaitTime] = useState<number>(10);
+  const [redDiamonds, setRedDiamonds] = useState<number>(0);
+
   const [selectedStake, setSelectedStake] = useState<number>(100);
   const [isBetPlaced, setIsBetPlaced] = useState<boolean>(false);
-  const [multiplier, setMultiplier] = useState<number>(1.00);
-  const [crashPoint, setCrashPoint] = useState<number>(2.00);
+  const [multiplier, setMultiplier] = useState<number>(1.0);
+  const [crashPoint, setCrashPoint] = useState<number>(2.0);
   const [profitWon, setProfitWon] = useState<number>(0);
+  const [busy, setBusy] = useState(false);
 
   const animRef = useRef<number | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
+  const balanceRef = useRef(0);
+  const isBetPlacedRef = useRef(false);
+  const selectedStakeRef = useRef(100);
+  const deductDoneRef = useRef(false);
+  const launchStartedRef = useRef(false);
+
+  const applyBalance = useCallback((next: number) => {
+    const n = Math.max(0, Math.floor(Number(next) || 0));
+    balanceRef.current = n;
+    setRedDiamonds(n);
+    updateGlobalBalance(n);
+  }, []);
+
+  const loadBalanceFromServer = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.user?.id) {
+        const local = getGlobalBalance();
+        balanceRef.current = local;
+        setRedDiamonds(local);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('red_diamonds')
+        .eq('id', session.user.id)
+        .single();
+      if (error || data == null) {
+        const local = getGlobalBalance();
+        balanceRef.current = local;
+        setRedDiamonds(local);
+        return;
+      }
+      applyBalance(data.red_diamonds ?? 0);
+    } catch {
+      const local = getGlobalBalance();
+      balanceRef.current = local;
+      setRedDiamonds(local);
+    }
+  }, [applyBalance]);
 
   useEffect(() => {
-    setRedDiamonds(getWalletBalance());
+    isBetPlacedRef.current = isBetPlaced;
+  }, [isBetPlaced]);
+
+  useEffect(() => {
+    selectedStakeRef.current = selectedStake;
+  }, [selectedStake]);
+
+  useEffect(() => {
+    void loadBalanceFromServer();
 
     const handleWalletSync = (e: Event) => {
       const customEvent = e as CustomEvent;
+      let next = getGlobalBalance();
       if (customEvent.detail !== undefined) {
-        setRedDiamonds(customEvent.detail);
-      } else {
-        setRedDiamonds(getWalletBalance());
+        if (typeof customEvent.detail === 'number') next = customEvent.detail;
+        else if (typeof customEvent.detail?.balance === 'number')
+          next = customEvent.detail.balance;
+        else if (typeof customEvent.detail?.redDiamonds === 'number')
+          next = customEvent.detail.redDiamonds;
       }
+      balanceRef.current = next;
+      setRedDiamonds(next);
     };
 
     window.addEventListener('walletUpdated', handleWalletSync);
     window.addEventListener('storage', handleWalletSync);
 
     if (typeof window !== 'undefined') {
-      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        audioCtxRef.current = new AudioCtx();
-      }
+      const AudioCtx =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext })
+          .webkitAudioContext;
+      if (AudioCtx) audioCtxRef.current = new AudioCtx();
     }
 
     return () => {
       window.removeEventListener('walletUpdated', handleWalletSync);
       window.removeEventListener('storage', handleWalletSync);
     };
-  }, []);
+  }, [loadBalanceFromServer]);
 
   const playSound = (freq = 440, type: OscillatorType = 'sine') => {
     try {
       const ctx = audioCtxRef.current;
       if (!ctx) return;
-      if (ctx.state === 'suspended') ctx.resume();
+      if (ctx.state === 'suspended') void ctx.resume();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = type;
@@ -63,62 +126,87 @@ export default function RocketCrashGame({ onBackToLobby }: RocketCrashGameProps)
       gain.connect(ctx.destination);
       osc.start();
       osc.stop(ctx.currentTime + 0.1);
-    } catch (e) {}
+    } catch {
+      // optional
+    }
   };
 
-  // 10s Auto Countdown loop before launch & auto-restart after crash
+  // 10s wait → deduct if bet → launch (same rules)
   useEffect(() => {
     if (gameState !== 'WAITING' && gameState !== 'CRASHED') return;
 
-    // If coming from crash, reset state to WAITING and start 10s timer
     if (gameState === 'CRASHED') {
       const resetTimer = setTimeout(() => {
         setWaitTime(10);
         setIsBetPlaced(false);
-        setMultiplier(1.00);
+        isBetPlacedRef.current = false;
+        setMultiplier(1.0);
+        deductDoneRef.current = false;
+        launchStartedRef.current = false;
         setGameState('WAITING');
-      }, 3000); // Show crash screen for 3 seconds before starting 10s countdown
+      }, 3000);
       return () => clearTimeout(resetTimer);
     }
 
     if (waitTime > 0) {
       const timer = setTimeout(() => {
-        setWaitTime(prev => prev - 1);
+        setWaitTime((prev) => prev - 1);
         playSound(500, 'triangle');
       }, 1000);
       return () => clearTimeout(timer);
-    } else {
-      // Time's up! Launch time
-      if (isBetPlaced) {
-        const currentBalance = getWalletBalance();
-        if (currentBalance < selectedStake) {
+    }
+
+    if (launchStartedRef.current) return;
+    launchStartedRef.current = true;
+
+    const launch = async () => {
+      if (isBetPlacedRef.current) {
+        const stake = selectedStakeRef.current;
+        if (balanceRef.current < stake) {
           alert('Not enough Red Diamonds! Bet cancelled.');
           setIsBetPlaced(false);
+          isBetPlacedRef.current = false;
         } else {
-          const newBal = updateWalletBalance(-selectedStake);
-          setRedDiamonds(newBal);
+          try {
+            const { data, error } = await supabase.rpc('game_deduct_red', {
+              p_amount: stake,
+              p_game_key: GAME_KEY,
+            });
+            if (error) throw error;
+            applyBalance(
+              typeof data === 'number' ? data : balanceRef.current - stake
+            );
+            deductDoneRef.current = true;
+          } catch (err) {
+            console.error('rocket deduct failed', err);
+            alert('Bet failed. Check balance.');
+            setIsBetPlaced(false);
+            isBetPlacedRef.current = false;
+            void loadBalanceFromServer();
+          }
         }
       }
-      
-      // Balanced house edge crash point calculation (1.05x to 15.00x)
+
       const rand = Math.random();
       let randomCrash = 1.05;
       if (rand < 0.4) {
         randomCrash = parseFloat((1.05 + Math.random() * 0.5).toFixed(2));
       } else if (rand < 0.75) {
-        randomCrash = parseFloat((1.60 + Math.random() * 2.5).toFixed(2));
+        randomCrash = parseFloat((1.6 + Math.random() * 2.5).toFixed(2));
       } else {
-        randomCrash = parseFloat((4.20 + Math.random() * 10.0).toFixed(2));
+        randomCrash = parseFloat((4.2 + Math.random() * 10.0).toFixed(2));
       }
 
       setCrashPoint(randomCrash);
-      setMultiplier(1.00);
+      setMultiplier(1.0);
       setGameState('FLYING');
       setProfitWon(0);
-    }
-  }, [waitTime, gameState]);
+    };
 
-  // Multiplier flight loop - Rocket keeps flying independently until it hits crashPoint
+    void launch();
+  }, [waitTime, gameState, applyBalance, loadBalanceFromServer]);
+
+  // Flight loop — same formula
   useEffect(() => {
     if (gameState !== 'FLYING' && gameState !== 'CASHED_OUT') return;
 
@@ -126,7 +214,9 @@ export default function RocketCrashGame({ onBackToLobby }: RocketCrashGameProps)
 
     const runFlight = () => {
       const elapsed = (Date.now() - startTime) / 1000;
-      const currentMult = parseFloat((1.00 + elapsed * 0.15 + Math.pow(elapsed, 1.4) * 0.05).toFixed(2));
+      const currentMult = parseFloat(
+        (1.0 + elapsed * 0.15 + Math.pow(elapsed, 1.4) * 0.05).toFixed(2)
+      );
 
       if (currentMult >= crashPoint) {
         setMultiplier(crashPoint);
@@ -140,193 +230,314 @@ export default function RocketCrashGame({ onBackToLobby }: RocketCrashGameProps)
     };
 
     animRef.current = requestAnimationFrame(runFlight);
-
     return () => {
       if (animRef.current) cancelAnimationFrame(animRef.current);
     };
   }, [gameState === 'FLYING' || gameState === 'CASHED_OUT', crashPoint]);
 
   const handlePlaceBet = () => {
-    if (gameState !== 'WAITING') return;
-    const currentBalance = getWalletBalance();
-    if (currentBalance < selectedStake) {
+    if (gameState !== 'WAITING' || busy) return;
+    if (balanceRef.current < selectedStake) {
       alert('Not enough Red Diamonds!');
       return;
     }
     setIsBetPlaced(true);
+    isBetPlacedRef.current = true;
     playSound(600, 'sine');
   };
 
   const handleCancelBet = () => {
     if (gameState !== 'WAITING') return;
     setIsBetPlaced(false);
+    isBetPlacedRef.current = false;
     playSound(300, 'sine');
   };
 
-  const handleCashOut = () => {
-    if (gameState !== 'FLYING' || !isBetPlaced) return;
+  const handleCashOut = async () => {
+    if (gameState !== 'FLYING' || !isBetPlacedRef.current || !deductDoneRef.current)
+      return;
+    if (busy) return;
 
-    const wonAmt = Math.floor(selectedStake * multiplier);
-    setProfitWon(wonAmt);
-    const newBal = updateWalletBalance(wonAmt);
-    setRedDiamonds(newBal);
-    setGameState('CASHED_OUT');
-    playSound(880, 'square');
+    const stake = selectedStakeRef.current;
+    const wonAmt = Math.floor(stake * multiplier);
+    setBusy(true);
+
+    try {
+      const { data, error } = await supabase.rpc('game_credit_red', {
+        p_amount: wonAmt,
+        p_game_key: GAME_KEY,
+      });
+      if (error) throw error;
+      applyBalance(
+        typeof data === 'number' ? data : balanceRef.current + wonAmt
+      );
+      setProfitWon(wonAmt);
+      setGameState('CASHED_OUT');
+      playSound(880, 'square');
+    } catch (err) {
+      console.error('rocket cashout failed', err);
+      alert('Cash out failed. Try again or refresh wallet.');
+      void loadBalanceFromServer();
+    } finally {
+      setBusy(false);
+    }
   };
 
-  // Calculate SVG curve coordinates based on multiplier
-  const progressX = Math.min(280, 40 + (multiplier - 1) * 60);
-  const progressY = Math.max(20, 160 - (multiplier - 1) * 35);
+  // Graph progress (same math, richer path)
+  const t = Math.min(1, (multiplier - 1) / 8);
+  const progressX = 24 + t * 260;
+  const progressY = 168 - t * t * 130;
+  const rocketRotate = -25 - t * 35;
 
   return (
-    <div className="w-full max-w-md bg-gray-950 border border-cyan-500/40 rounded-3xl p-4 flex flex-col items-center shadow-2xl relative overflow-hidden select-none mx-auto text-white">
-      {/* Top Bar */}
-      <div className="w-full flex justify-between items-center mb-2">
+    <div className="w-full max-w-md bg-[#05060c] border border-cyan-500/35 rounded-3xl p-4 flex flex-col items-center shadow-[0_20px_60px_rgba(0,0,0,.65)] relative overflow-hidden select-none mx-auto text-white">
+      {/* subtle scan / vignette */}
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_50%_0%,rgba(34,211,238,.12),transparent_55%)]" />
+
+      <div className="w-full flex justify-between items-center mb-2 relative z-10">
         {onBackToLobby ? (
           <button
             onClick={onBackToLobby}
-            className="px-3 py-1 bg-gray-900 hover:bg-gray-800 text-gray-300 font-bold text-[11px] rounded-xl border border-gray-800 cursor-pointer"
+            className="px-3 py-1 bg-gray-900/90 hover:bg-gray-800 text-gray-300 font-bold text-[11px] rounded-xl border border-gray-700/80 cursor-pointer"
           >
             ← Back
           </button>
-        ) : <div />}
-        <div className="flex items-center gap-1.5 bg-red-950/60 px-3 py-1 rounded-xl border border-red-500/30">
+        ) : (
+          <div />
+        )}
+        <div className="flex items-center gap-1.5 bg-red-950/70 px-3 py-1.5 rounded-xl border border-red-500/40 shadow-[0_0_20px_rgba(239,68,68,.15)]">
           <span className="text-sm">🔴</span>
-          <span className="text-xs font-black text-red-400">{redDiamonds}</span>
+          <span className="text-xs font-black text-red-300 tabular-nums">
+            {redDiamonds.toLocaleString()}
+          </span>
         </div>
       </div>
 
-      <div className="w-full text-center mb-2">
-        <h2 className="text-sm font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500 uppercase tracking-wider">
-          🚀 Neon Rocket Sky Flight
+      <div className="w-full text-center mb-2 relative z-10">
+        <h2 className="text-sm font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-sky-400 to-blue-500 uppercase tracking-[0.15em]">
+          🚀 Neon Rocket Crash
         </h2>
-        <p className="text-[10px] text-gray-400">Live multiplier action. Place bet & cash out before crash!</p>
+        <p className="text-[10px] text-gray-400 mt-0.5">
+          Cash out before the rocket explodes
+        </p>
       </div>
 
-      {/* Cloud Background Flight Arena */}
-      <div className="w-full h-52 bg-gradient-to-b from-sky-950 via-gray-900 to-black rounded-2xl border border-cyan-500/30 flex flex-col items-center justify-center relative overflow-hidden mb-3 shadow-inner">
-        {/* Animated Clouds */}
-        <div className="absolute inset-0 opacity-20 pointer-events-none">
-          <div className="absolute top-4 left-6 text-xl animate-pulse">☁️</div>
-          <div className="absolute top-16 right-8 text-2xl animate-pulse delay-75">☁️</div>
-          <div className="absolute bottom-6 left-1/3 text-lg animate-pulse delay-150">☁️</div>
+      {/* 2.5D flight arena */}
+      <div className="w-full h-56 rounded-2xl border border-cyan-500/25 relative overflow-hidden mb-3 shadow-[inset_0_0_40px_rgba(0,0,0,.8)]">
+        {/* layered sky */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#0a1628] via-[#0c1220] to-[#050508]" />
+        <div className="absolute inset-0 opacity-40 bg-[radial-gradient(circle_at_30%_20%,rgba(56,189,248,.25),transparent_40%),radial-gradient(circle_at_80%_60%,rgba(239,68,68,.12),transparent_35%)]" />
+
+        {/* parallax stars */}
+        <div className="absolute inset-0 opacity-50 pointer-events-none">
+          {[12, 40, 70, 110, 150, 200, 240, 280].map((x, i) => (
+            <div
+              key={i}
+              className="absolute w-0.5 h-0.5 rounded-full bg-white"
+              style={{
+                left: `${(x % 100) * 0.9}%`,
+                top: `${10 + (i * 11) % 70}%`,
+                opacity: 0.4 + (i % 3) * 0.2,
+              }}
+            />
+          ))}
         </div>
 
-        {/* SVG Graph Line & Flying Rocket */}
+        {/* ground perspective strip */}
+        <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-black via-cyan-950/40 to-transparent border-t border-cyan-500/20" />
+        <div
+          className="absolute bottom-2 left-1/2 -translate-x-1/2 w-[85%] h-1 rounded-full bg-cyan-500/20 blur-[1px]"
+          style={{ transform: 'translateX(-50%) perspective(200px) rotateX(60deg)' }}
+        />
+
+        {/* flight curve + glow */}
         {(gameState === 'FLYING' || gameState === 'CASHED_OUT') && (
-          <svg className="absolute inset-0 w-full h-full pointer-events-none">
+          <svg
+            className="absolute inset-0 w-full h-full pointer-events-none"
+            viewBox="0 0 320 200"
+            preserveAspectRatio="none"
+          >
+            <defs>
+              <linearGradient id="trailGrad" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.2" />
+                <stop offset="100%" stopColor="#ef4444" stopOpacity="0.95" />
+              </linearGradient>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="2.5" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
             <path
-              d={`M 20 180 Q ${progressX / 2} 180, ${progressX} ${progressY}`}
+              d={`M 18 175 Q ${progressX * 0.45} 175, ${progressX} ${progressY}`}
               fill="none"
-              stroke="#ef4444"
-              strokeWidth="4"
+              stroke="url(#trailGrad)"
+              strokeWidth="5"
               strokeLinecap="round"
-              className="drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]"
+              filter="url(#glow)"
+            />
+            <path
+              d={`M 18 175 Q ${progressX * 0.45} 175, ${progressX} ${progressY}`}
+              fill="none"
+              stroke="#fff"
+              strokeWidth="1.2"
+              strokeOpacity="0.35"
+              strokeLinecap="round"
             />
           </svg>
         )}
 
-        {/* Center Screen States */}
+        {/* rocket with depth shadow */}
+        {(gameState === 'FLYING' || gameState === 'CASHED_OUT') && (
+          <>
+            <div
+              className="absolute z-20 pointer-events-none"
+              style={{
+                left: `${(progressX / 320) * 100}%`,
+                top: `${(progressY / 200) * 100}%`,
+                transform: `translate(-50%, -50%) rotate(${rocketRotate}deg)`,
+              }}
+            >
+              <div className="relative">
+                <div className="absolute inset-0 blur-md bg-orange-500/50 scale-150" />
+                <span className="relative text-3xl drop-shadow-[0_8px_12px_rgba(0,0,0,.9)]">
+                  🚀
+                </span>
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-6 bg-gradient-to-t from-transparent via-orange-400 to-yellow-200 opacity-80 blur-[2px] animate-pulse" />
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* center states */}
         {gameState === 'WAITING' && (
-          <div className="flex flex-col items-center z-10 animate-pulse">
-            <span className="text-xs font-bold text-cyan-400 mb-1">NEXT FLIGHT IN</span>
-            <span className="text-4xl font-black text-white font-mono">{waitTime}s</span>
-            <span className="text-[9px] text-gray-300 mt-1">
-              {isBetPlaced ? `Bet Locked: ${selectedStake} 🔴` : 'Place your bet below!'}
-            </span>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center">
+            <div className="rounded-2xl border border-cyan-400/30 bg-black/50 px-6 py-4 backdrop-blur-md shadow-[0_0_40px_rgba(34,211,238,.2)]">
+              <span className="block text-[10px] font-bold text-cyan-300/90 mb-1 tracking-[0.2em] uppercase text-center">
+                Next flight in
+              </span>
+              <span className="block text-5xl font-black text-white font-mono text-center tabular-nums drop-shadow-[0_0_20px_rgba(34,211,238,.5)]">
+                {waitTime}
+                <span className="text-lg text-cyan-300">s</span>
+              </span>
+              <span className="block text-[10px] text-gray-300 mt-2 text-center">
+                {isBetPlaced
+                  ? `Bet locked · ${selectedStake} 🔴`
+                  : 'Place your bet below'}
+              </span>
+            </div>
           </div>
         )}
 
         {(gameState === 'FLYING' || gameState === 'CASHED_OUT') && (
-          <div 
-            className="absolute z-20 flex items-center gap-1 transition-all duration-75"
-            style={{ left: `${progressX}px`, top: `${progressY}px` }}
-          >
-            <span className="text-2xl animate-bounce">🚀</span>
-          </div>
-        )}
-
-        {(gameState === 'FLYING' || gameState === 'CASHED_OUT') && (
-          <div className="absolute top-4 z-10 flex flex-col items-center">
-            <span className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-emerald-400 font-mono tracking-wider">
+          <div className="absolute top-3 left-0 right-0 z-10 flex flex-col items-center">
+            <span className="text-4xl font-black font-mono tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-cyan-200 via-emerald-300 to-yellow-300 drop-shadow-[0_0_24px_rgba(52,211,153,.45)]">
               {multiplier.toFixed(2)}x
             </span>
           </div>
         )}
 
         {gameState === 'CRASHED' && (
-          <div className="flex flex-col items-center z-10">
-            <span className="text-xs font-bold text-red-500 uppercase tracking-widest">💥 ROCKET CRASHED</span>
-            <span className="text-4xl font-black text-red-500 font-mono">{multiplier.toFixed(2)}x</span>
-            <span className="text-[10px] text-gray-400 mt-1">Next round starting soon...</span>
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-red-950/40 backdrop-blur-[2px]">
+            <div className="text-4xl mb-1 animate-pulse">💥</div>
+            <span className="text-[10px] font-bold text-red-300 uppercase tracking-[0.25em]">
+              Crashed
+            </span>
+            <span className="text-4xl font-black text-red-400 font-mono">
+              {multiplier.toFixed(2)}x
+            </span>
+            <span className="text-[10px] text-gray-400 mt-1">
+              Next round soon...
+            </span>
           </div>
         )}
       </div>
 
-      {/* Dynamic Action Button (No manual next flight button, fully automated 10s cycle) */}
-      <div className="w-full mb-3">
+      {/* actions — same flow */}
+      <div className="w-full mb-3 relative z-10">
         {gameState === 'WAITING' ? (
           isBetPlaced ? (
             <button
               onClick={handleCancelBet}
-              className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-black text-xs rounded-2xl shadow-lg active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+              className="w-full py-3.5 bg-gradient-to-b from-red-600 to-red-800 hover:from-red-500 text-white font-black text-xs rounded-2xl border border-red-400/30 shadow-[0_8px_24px_rgba(220,38,38,.35)] active:scale-[0.98] transition-all cursor-pointer uppercase tracking-wider"
             >
-              ❌ CANCEL BET ({selectedStake} 🔴)
+              ❌ Cancel bet ({selectedStake} 🔴)
             </button>
           ) : (
             <button
               onClick={handlePlaceBet}
-              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 text-black font-black text-xs rounded-2xl shadow-lg shadow-green-500/30 active:scale-95 transition-all cursor-pointer uppercase tracking-wider"
+              disabled={busy}
+              className="w-full py-3.5 bg-gradient-to-b from-emerald-400 to-green-700 hover:from-emerald-300 text-black font-black text-xs rounded-2xl border border-emerald-200/40 shadow-[0_8px_28px_rgba(16,185,129,.35)] active:scale-[0.98] transition-all cursor-pointer uppercase tracking-wider disabled:opacity-60"
             >
-              ✅ PLACE BET ({selectedStake} 🔴)
+              ✅ Place bet ({selectedStake} 🔴)
             </button>
           )
         ) : gameState === 'FLYING' ? (
-          isBetPlaced ? (
+          isBetPlaced && deductDoneRef.current ? (
             <button
-              onClick={handleCashOut}
-              className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-400 text-black font-black text-sm rounded-2xl shadow-lg shadow-green-500/30 active:scale-95 transition-all cursor-pointer uppercase tracking-wider animate-pulse"
+              onClick={() => void handleCashOut()}
+              disabled={busy}
+              className="w-full py-3.5 bg-gradient-to-b from-emerald-400 to-green-600 text-black font-black text-sm rounded-2xl border border-white/20 shadow-[0_0_30px_rgba(16,185,129,.45)] active:scale-[0.98] transition-all cursor-pointer uppercase tracking-wider animate-pulse disabled:opacity-70"
             >
-              💰 CASH OUT ({Math.floor(selectedStake * multiplier)} 🔴)
+              💰 Cash out ({Math.floor(selectedStake * multiplier)} 🔴)
             </button>
           ) : (
-            <div className="w-full py-3 bg-gray-900 border border-gray-800 text-gray-400 font-bold text-xs rounded-2xl text-center uppercase tracking-wider">
-              👀 Spectating Flight (No Bet)
+            <div className="w-full py-3 bg-gray-900/80 border border-gray-700 text-gray-400 font-bold text-xs rounded-2xl text-center uppercase tracking-wider">
+              👀 Spectating (no bet)
             </div>
           )
         ) : gameState === 'CASHED_OUT' ? (
-          <div className="w-full py-3 bg-emerald-950 border border-emerald-500/40 text-emerald-400 font-black text-xs rounded-2xl text-center uppercase tracking-wider flex flex-col items-center">
-            <span>🎉 SUCCESSFUL CASHOUT: +{profitWon} 🔴</span>
-            <span className="text-[9px] text-gray-300 font-normal">Rocket still flying...</span>
+          <div className="w-full py-3 bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 font-black text-xs rounded-2xl text-center uppercase tracking-wider flex flex-col items-center shadow-[0_0_20px_rgba(16,185,129,.2)]">
+            <span>🎉 Cashed out +{profitWon} 🔴</span>
+            <span className="text-[9px] text-gray-400 font-normal normal-case">
+              Rocket still flying...
+            </span>
           </div>
         ) : (
-          <div className="w-full py-3 bg-red-950/80 border border-red-500/40 text-red-400 font-black text-xs rounded-2xl text-center uppercase tracking-wider animate-pulse">
-            ⏳ Next round starting in 10s...
+          <div className="w-full py-3 bg-red-950/80 border border-red-500/40 text-red-300 font-black text-xs rounded-2xl text-center uppercase tracking-wider animate-pulse">
+            ⏳ Next round in 10s...
           </div>
         )}
       </div>
 
-      {/* Stake Amount Selector Grid */}
-      <div className="w-full bg-gray-900/90 border border-gray-800 p-2.5 rounded-2xl flex flex-col gap-2">
+      <div className="w-full bg-gray-900/80 border border-gray-800/90 p-2.5 rounded-2xl flex flex-col gap-2 relative z-10">
         <div className="flex justify-between items-center">
-          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Choose Stake Amount</span>
-          <span className="text-[10px] text-cyan-400 font-mono font-bold">Selected: {selectedStake} 🔴</span>
+          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">
+            Stake
+          </span>
+          <span className="text-[10px] text-cyan-300 font-mono font-bold">
+            {selectedStake} 🔴
+          </span>
         </div>
         <div className="grid grid-cols-6 gap-1">
-          {[50, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000].map((amt) => (
-            <button
-              key={amt}
-              disabled={gameState === 'FLYING' || gameState === 'CASHED_OUT' || (gameState === 'WAITING' && isBetPlaced)}
-              onClick={() => setSelectedStake(amt)}
-              className={`py-1 rounded-lg text-[9px] font-black border transition-all cursor-pointer ${
-                selectedStake === amt 
-                  ? 'bg-cyan-400 text-black border-cyan-200 shadow-md shadow-cyan-500/30 scale-105' 
-                  : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-700'
-              } ${(gameState === 'FLYING' || gameState === 'CASHED_OUT' || (gameState === 'WAITING' && isBetPlaced)) ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              {amt}
-            </button>
-          ))}
+          {[50, 100, 150, 200, 300, 400, 500, 600, 700, 800, 900, 1000].map(
+            (amt) => (
+              <button
+                key={amt}
+                disabled={
+                  gameState === 'FLYING' ||
+                  gameState === 'CASHED_OUT' ||
+                  (gameState === 'WAITING' && isBetPlaced)
+                }
+                onClick={() => setSelectedStake(amt)}
+                className={`py-1.5 rounded-lg text-[9px] font-black border transition-all cursor-pointer ${
+                  selectedStake === amt
+                    ? 'bg-gradient-to-b from-cyan-300 to-cyan-500 text-black border-cyan-100 shadow-[0_0_12px_rgba(34,211,238,.4)] scale-105'
+                    : 'bg-gray-800/90 text-gray-300 border-gray-700 hover:bg-gray-700'
+                } ${
+                  gameState === 'FLYING' ||
+                  gameState === 'CASHED_OUT' ||
+                  (gameState === 'WAITING' && isBetPlaced)
+                    ? 'opacity-50 cursor-not-allowed'
+                    : ''
+                }`}
+              >
+                {amt}
+              </button>
+            )
+          )}
         </div>
       </div>
     </div>

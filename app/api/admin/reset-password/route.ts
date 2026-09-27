@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
-import { supabaseAdmin } from '@/lib/supabaseadmin';
+import { supabaseAdmin } from '@/lib/supabaseAdmin';
 
 export async function POST(request: Request) {
   const auth = await verifyAdminRequest(request, 'password_reset');
@@ -16,19 +16,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'user_uid is required.' }, { status: 400 });
   }
 
-  const { data: profile, error: profileError } = await supabaseAdmin
-    .from('profiles')
-    .select('id, user_uid')
-    .eq('user_uid', targetUid)
-    .maybeSingle();
+  // Looks the player up by their UID, computed live from their real id —
+  // never trusts the (unreliable/empty) profiles.user_uid text column.
+  const { data: profileId, error: lookupError } = await supabaseAdmin.rpc(
+    'admin_find_profile_id_by_uid',
+    { p_uid: targetUid }
+  );
 
-  if (profileError || !profile) {
+  if (lookupError) {
+    return NextResponse.json({ error: lookupError.message }, { status: 500 });
+  }
+
+  if (!profileId) {
     return NextResponse.json({ error: 'Player not found for that UID.' }, { status: 404 });
   }
 
   const newPassword = generateTempPassword();
 
-  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(profile.id, {
+  const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(profileId, {
     password: newPassword,
   });
 
@@ -36,12 +41,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: updateError.message }, { status: 500 });
   }
 
-  // Audit trail — the action is logged, the actual password never is.
   await supabaseAdmin.from('admin_audit_log').insert({
     admin_id: auth.userId,
     action: 'reset_player_password',
     target_type: 'profiles',
-    target_id: profile.id,
+    target_id: profileId,
     target_player_uid: targetUid,
     detail: {},
   });

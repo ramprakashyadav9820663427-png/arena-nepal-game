@@ -16,6 +16,7 @@ import WalletSection from '@/components/WalletSection';
 import RankSection from '@/components/RankSection';
 import DailyMissions from '@/components/DailyMissions';
 import AuthModal from '@/components/AuthModal';
+import LandingPage from '@/components/LandingPage';
 import { supabase } from '@/lib/supabase';
 
 const DUMMY_WINNERS = [
@@ -136,6 +137,7 @@ export default function Home() {
   const [onlinePlayers, setOnlinePlayers] = useState<number>(1428);
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState<number>(0);
   const [session, setSession] = useState<any>(null);
+  const [checkingSession, setCheckingSession] = useState<boolean>(true);
   const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
   const [redDiamonds, setRedDiamonds] = useState<number>(0);
@@ -198,8 +200,7 @@ export default function Home() {
 
         if (data) {
           const localRed = readLocalRed();
-          const isNewPlayer = (data.red_diamonds ?? 0) === 0 && data.welcome_bonus_claimed !== true;
-          const red = isNewPlayer ? 0 : (localRed !== null ? localRed : (data.red_diamonds ?? 0));
+          const red = localRed !== null ? localRed : (data.red_diamonds ?? 0);
           const white = data.white_diamonds ?? 0;
           const cash = data.winning_cash ?? 0;
           updateBalances(red, white, cash);
@@ -304,9 +305,11 @@ export default function Home() {
       if (!isMounted) return;
 
       setSession(currentSession);
+      setCheckingSession(false);
 
       if (!currentSession) {
-        setShowAuthModal(true);
+        // Logged-out visitors see the public LandingPage instead — the
+        // auth modal now only opens when they tap a button on it.
         updateBalances(0, 0, 0);
         setShowWelcomeBonus(false);
         return;
@@ -335,7 +338,6 @@ export default function Home() {
         await fetchProfileBalances(newSession.user.id);
         setupRealtime(newSession.user.id);
       } else {
-        setShowAuthModal(true);
         updateBalances(0, 0, 0);
         setShowWelcomeBonus(false);
         setShowDepositPromo(false);
@@ -438,6 +440,24 @@ export default function Home() {
     }
   };
 
+  // ---- Logged-out visitors: public landing page, not the game lobby ----
+  if (!checkingSession && !session) {
+    return (
+      <>
+        <LandingPage onOpenAuth={() => setShowAuthModal(true)} />
+        <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      </>
+    );
+  }
+
+  if (checkingSession) {
+    return (
+      <main className="min-h-screen bg-[#050508] flex items-center justify-center">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-yellow-400 border-t-transparent" />
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[#050508] text-white flex flex-col items-center pb-24 select-none relative overflow-x-hidden">
       <div className="pointer-events-none fixed inset-0 z-0">
@@ -468,29 +488,18 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
-            {session ? (
-              <>
-                <div className="flex items-center gap-1 bg-white/5 border border-white/15 px-2 py-1 rounded-xl shadow-inner">
-                  <span className="text-[11px]">⚪</span>
-                  <span className="text-[11px] font-black text-gray-100 tabular-nums">
-                    {whiteDiamonds.toLocaleString()}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 bg-gradient-to-r from-red-950/80 to-purple-950/80 border border-red-500/45 px-2 py-1 rounded-xl shadow-[0_0_12px_rgba(239,68,68,0.2)]">
-                  <span className="text-[11px]">🔴</span>
-                  <span className="text-[11px] font-black text-red-400 tabular-nums">
-                    {redDiamonds.toLocaleString()}
-                  </span>
-                </div>
-              </>
-            ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="text-[10px] font-black bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-black px-3 py-1.5 rounded-xl shadow-lg hover:scale-105 active:scale-95 transition-all cursor-pointer"
-              >
-                Login
-              </button>
-            )}
+            <div className="flex items-center gap-1 bg-white/5 border border-white/15 px-2 py-1 rounded-xl shadow-inner">
+              <span className="text-[11px]">⚪</span>
+              <span className="text-[11px] font-black text-gray-100 tabular-nums">
+                {whiteDiamonds.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex items-center gap-1 bg-gradient-to-r from-red-950/80 to-purple-950/80 border border-red-500/45 px-2 py-1 rounded-xl shadow-[0_0_12px_rgba(239,68,68,0.2)]">
+              <span className="text-[11px]">🔴</span>
+              <span className="text-[11px] font-black text-red-400 tabular-nums">
+                {redDiamonds.toLocaleString()}
+              </span>
+            </div>
 
             {selectedGame && (
               <button
@@ -592,9 +601,9 @@ export default function Home() {
                     </div>
                     <button
                       onClick={handleClaimDaily}
-                      disabled={dailyClaimed || !session}
+                      disabled={dailyClaimed}
                       className={`px-3.5 py-1.5 rounded-xl text-[10px] font-black transition-all cursor-pointer shadow-lg ${
-                        dailyClaimed || !session
+                        dailyClaimed
                           ? 'bg-gray-800/80 text-gray-500 border border-gray-700 cursor-not-allowed'
                           : 'bg-gradient-to-r from-cyan-400 to-blue-500 text-black hover:scale-105 active:scale-95'
                       }`}
@@ -666,14 +675,6 @@ export default function Home() {
       {showDailyMissions && (
         <DailyMissions onClose={() => setShowDailyMissions(false)} />
       )}
-
-      {/* AUTH MODAL — single layer (AuthModal has its own overlay) */}
-      <AuthModal
-        isOpen={showAuthModal}
-        onClose={() => {
-          if (session) setShowAuthModal(false);
-        }}
-      />
 
       {showWelcomeBonus && session && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
@@ -840,3 +841,4 @@ export default function Home() {
     </main>
   );
 }
+

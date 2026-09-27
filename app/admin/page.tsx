@@ -78,6 +78,12 @@ export default function AdminPage() {
   const [loadingDeposits, setLoadingDeposits] = useState(false);
   const [busyDepositId, setBusyDepositId] = useState<string | number | null>(null);
 
+  // ---- Manual diamond credit ----
+  const [manualUid, setManualUid] = useState('');
+  const [manualAmount, setManualAmount] = useState('');
+  const [manualNote, setManualNote] = useState('');
+  const [creditingManual, setCreditingManual] = useState(false);
+
   // ---- Withdraws ----
   const [withdraws, setWithdraws] = useState<WithdrawRequest[]>([]);
   const [loadingWithdraws, setLoadingWithdraws] = useState(false);
@@ -106,7 +112,6 @@ export default function AdminPage() {
     const { data, error } = await supabase.rpc('get_my_admin_roles');
 
     if (error || !data || (Array.isArray(data) && data.length === 0)) {
-      // Not an admin — sign them straight back out.
       await supabase.auth.signOut();
       setIsLoggedIn(false);
       setRoles([]);
@@ -262,6 +267,43 @@ export default function AdminPage() {
     }
   };
 
+  const creditManualDiamonds = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const amount = Number(manualAmount);
+
+    if (!manualUid.trim()) {
+      notify('Enter the player UID.', 'error');
+      return;
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      notify('Enter a valid diamond amount.', 'error');
+      return;
+    }
+
+    setCreditingManual(true);
+
+    try {
+      const { error } = await supabase.rpc('admin_manual_credit_diamonds', {
+        p_uid: manualUid.trim(),
+        p_amount: amount,
+        p_note: manualNote.trim() || null,
+      });
+
+      if (error) throw error;
+
+      notify(`${amount} Red Diamonds credited to ${manualUid.trim()}.`);
+      setManualUid('');
+      setManualAmount('');
+      setManualNote('');
+    } catch (err: any) {
+      notify(err?.message || 'Credit failed.', 'error');
+    } finally {
+      setCreditingManual(false);
+    }
+  };
+
   // ---------------- Withdraws ----------------
 
   const fetchWithdraws = useCallback(async () => {
@@ -390,7 +432,7 @@ export default function AdminPage() {
   };
 
   const removeWorker = async (id: string) => {
-    if (!window.confirm('Remove this worker\'s admin access?')) return;
+    if (!window.confirm("Remove this worker's admin access?")) return;
     try {
       const { error } = await supabase.rpc('admin_remove_worker', { p_admin_id: id });
       if (error) throw error;
@@ -529,6 +571,48 @@ export default function AdminPage() {
         {/* DEPOSITS */}
         {activeTab === 'deposits' && canSee('deposit') && (
           <section className="flex flex-col gap-3">
+            {/* Manual diamond credit — for cases with no request row, e.g. cash handed
+                over in person, or any correction that needs to go straight in. */}
+            <div className="rounded-2xl border border-yellow-500/30 bg-gray-900 p-4">
+              <h2 className="mb-1 text-sm font-black text-yellow-300">MANUAL DIAMOND CREDIT</h2>
+              <p className="mb-3 text-[11px] text-gray-400">
+                Directly add Red Diamonds to a player's account by UID — no request needed.
+              </p>
+              <form onSubmit={creditManualDiamonds} className="flex flex-col gap-2">
+                <input
+                  type="text"
+                  placeholder="Player UID (e.g. AN-99B5EA1A)"
+                  value={manualUid}
+                  onChange={(e) => setManualUid(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                />
+                <input
+                  type="number"
+                  min="1"
+                  placeholder="Red Diamonds to add"
+                  value={manualAmount}
+                  onChange={(e) => setManualAmount(e.target.value)}
+                  required
+                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Note (optional, e.g. 'cash handed in person')"
+                  value={manualNote}
+                  onChange={(e) => setManualNote(e.target.value)}
+                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                />
+                <button
+                  type="submit"
+                  disabled={creditingManual}
+                  className="rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3 text-xs font-black text-black disabled:opacity-50"
+                >
+                  {creditingManual ? 'Crediting…' : 'Done — Credit Diamonds'}
+                </button>
+              </form>
+            </div>
+
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-black text-cyan-300">DEPOSIT REQUESTS</h2>
               <button
@@ -686,7 +770,7 @@ export default function AdminPage() {
             <form onSubmit={resetPassword} className="flex flex-col gap-3 sm:flex-row">
               <input
                 type="text"
-                placeholder="Player UID (e.g. AN-12345678)"
+                placeholder="Player UID (e.g. AN-99B5EA1A)"
                 value={resetUid}
                 onChange={(e) => setResetUid(e.target.value)}
                 required
