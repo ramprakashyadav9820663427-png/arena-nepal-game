@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { supabaseAdmin } from '@/lib/supabaseadmin';
 
 function buildPlayerUid(userId: string): string {
   return 'AN-' + userId.replace(/-/g, '').slice(0, 8).toUpperCase();
