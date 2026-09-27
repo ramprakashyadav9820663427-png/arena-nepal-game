@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { verifyAdminRequest } from '@/lib/adminAuth';
-import { supabaseAdmin } from '@/lib/supabaseAdmin';
+import { supabaseAdmin } from '@/lib/supabaseadmin';
 
 export async function GET(request: Request) {
   // Owner can view tournament live board
