@@ -1,6 +1,6 @@
+
 import type { Metadata } from 'next';
 import './globals.css';
-import { LanguageProvider } from './context/LanguageContext';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://arenanepal.xyz'),
@@ -89,9 +89,7 @@ export default function RootLayout({
       </head>
 
       <body>
-        <LanguageProvider>
-          <div>{children}</div>
-        </LanguageProvider>
+        <div>{children}</div>
       </body>
     </html>
   );

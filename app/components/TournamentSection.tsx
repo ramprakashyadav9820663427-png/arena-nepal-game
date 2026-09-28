@@ -7,7 +7,6 @@ import React, {
   useCallback,
 } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { useLanguage } from '../context/LanguageContext';
 import {
   getWalletBalance,
   updateGlobalBalance,
@@ -156,8 +155,6 @@ function pickTournamentRecord(
 }
 
 export default function TournamentSection() {
-  const { t } = useLanguage();
-
   const [redDiamonds, setRedDiamonds] = useState(0);
   const [activeTournament, setActiveTournament] =
     useState<TournamentType>('NONE');
@@ -889,7 +886,7 @@ export default function TournamentSection() {
           >
             {loadingAction
               ? 'STARTING...'
-              : `▶️ ${t.playNow || 'START MATCH'} (SURVIVE MODE)`}
+              : '▶️ START MATCH (SURVIVE MODE)'}
           </button>
 
           <button
@@ -897,7 +894,7 @@ export default function TournamentSection() {
             onClick={exitToTournaments}
             className="w-full mt-2 py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl"
           >
-            {t.back || 'Back to Tournaments'}
+            Back to Tournaments
           </button>
         </div>
       ) : gameStarted || gameOver ? (
@@ -957,7 +954,7 @@ export default function TournamentSection() {
                   onClick={exitToTournaments}
                   className="w-full py-2 bg-gray-800 text-gray-300 font-bold text-xs rounded-xl cursor-pointer disabled:opacity-50"
                 >
-                  {t.back || 'Exit to Tournaments'}
+                  Exit to Tournaments
                 </button>
               </div>
             )}
@@ -984,7 +981,7 @@ export default function TournamentSection() {
           </div>
 
           <h2 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400">
-            {t.tournament || 'ACTIVE TOURNAMENTS'}
+            ACTIVE TOURNAMENTS
           </h2>
 
           {loadingTournaments ? (
@@ -1003,3 +1000,4 @@ export default function TournamentSection() {
     </div>
   );
 }
+
