@@ -2,7 +2,15 @@ import { NextResponse } from 'next/server';
 import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
 import { supabaseAdmin } from '@/lib/supabaseadmin';
 
-const VALID_ROLES = ['deposit', 'withdraw', 'password_reset', 'owner'];
+const VALID_ROLES = [
+  'deposit',
+  'withdraw',
+  'password_reset',
+  'player_search',
+  'create_player',
+  'tournaments',
+  'owner',
+];
 
 export async function POST(request: Request) {
   const auth = await verifyAdminRequest(request, 'owner');
@@ -22,7 +30,7 @@ export async function POST(request: Request) {
   const cleanRoles = roles.filter((r) => VALID_ROLES.includes(r));
 
   if (cleanRoles.length === 0) {
-    return NextResponse.json({ error: 'Select at least one category.' }, { status: 400 });
+    return NextResponse.json({ error: 'Select at least one permission.' }, { status: 400 });
   }
 
   const tempPassword = generateTempPassword();

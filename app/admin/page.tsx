@@ -69,17 +69,32 @@ type TournamentAdminRow = {
   }[];
 };
 
-const ROLE_LABELS: Record<string, string> = {
-  deposit: 'Deposit',
-  withdraw: 'Withdraw',
-  password_reset: 'Password Reset',
-  owner: 'Owner (Full Access)',
-};
+// Every permission the owner can hand to a worker. Owner = everything.
+const PERMISSIONS: { key: string; label: string }[] = [
+  { key: 'deposit', label: 'Deposit' },
+  { key: 'withdraw', label: 'Withdraw' },
+  { key: 'password_reset', label: 'Password Reset' },
+  { key: 'player_search', label: 'Player Search' },
+  { key: 'create_player', label: 'Create Player' },
+  { key: 'tournaments', label: 'Tournaments' },
+  { key: 'owner', label: 'Owner (Full Access)' },
+];
+
+const ROLE_LABELS: Record<string, string> = Object.fromEntries(
+  PERMISSIONS.map((p) => [p.key, p.label])
+);
 
 function formatDate(value?: string) {
   if (!value) return '—';
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? value : d.toLocaleString();
+}
+
+function randomPassword(len = 10) {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
 }
 
 export default function AdminPage() {
@@ -118,13 +133,14 @@ export default function AdminPage() {
   const [busyWithdrawId, setBusyWithdrawId] = useState<string | number | null>(null);
   const [rejectReasonDraft, setRejectReasonDraft] = useState<Record<string, string>>({});
 
-  // ---- Player search (owner) ----
+  // ---- Player search ----
   const [playerSearchUid, setPlayerSearchUid] = useState('');
   const [playerResult, setPlayerResult] = useState<any>(null);
   const [searchingPlayer, setSearchingPlayer] = useState(false);
 
   // ---- Password reset ----
-  const [resetUid, setResetUid] = useState('');
+  const [resetIdentifier, setResetIdentifier] = useState('');
+  const [resetNewPassword, setResetNewPassword] = useState('');
   const [resettingPassword, setResettingPassword] = useState(false);
   const [lastResetResult, setLastResetResult] = useState<{ uid: string; password: string } | null>(null);
 
@@ -135,10 +151,14 @@ export default function AdminPage() {
   const [newWorkerRoles, setNewWorkerRoles] = useState<string[]>([]);
   const [creatingWorker, setCreatingWorker] = useState(false);
   const [lastCreatedWorker, setLastCreatedWorker] = useState<{ email: string; password: string } | null>(null);
+  const [workerRoleDraft, setWorkerRoleDraft] = useState<Record<string, string[]>>({});
+  const [savingWorkerId, setSavingWorkerId] = useState<string | null>(null);
 
-  // ---- Create player (owner) ----
+  // ---- Create player ----
   const [newPlayerName, setNewPlayerName] = useState('');
+  const [newPlayerNickname, setNewPlayerNickname] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
+  const [newPlayerPassword, setNewPlayerPassword] = useState('');
   const [newPlayerPhone, setNewPlayerPhone] = useState('');
   const [creatingPlayer, setCreatingPlayer] = useState(false);
   const [lastCreatedPlayer, setLastCreatedPlayer] = useState<{
@@ -147,10 +167,12 @@ export default function AdminPage() {
     password: string;
   } | null>(null);
 
-  // ---- Tournaments monitor (owner) ----
+  // ---- Tournaments monitor ----
   const [tournamentRows, setTournamentRows] = useState<TournamentAdminRow[]>([]);
   const [loadingTournaments, setLoadingTournaments] = useState(false);
   const [expandedTournamentId, setExpandedTournamentId] = useState<string | null>(null);
+
+  const canSee = (role: string) => roles.includes(role) || roles.includes('owner');
 
   const loadRolesForCurrentSession = useCallback(async () => {
     const { data, error } = await supabase.rpc('get_my_admin_roles');
@@ -162,31 +184,40 @@ export default function AdminPage() {
       return;
     }
 
-    const roleList = Array.isArray(data) ? data : [];
+    const roleList: string[] = Array.isArray(data) ? data : [];
     setRoles(roleList);
     setIsLoggedIn(true);
 
-    const first =
-      (roleList.includes('deposit') && 'deposits') ||
-      (roleList.includes('withdraw') && 'withdraws') ||
-      (roleList.includes('password_reset') && 'password') ||
-      (roleList.includes('owner') && 'deposits') ||
+    const isOwner = roleList.includes('owner');
+    const has = (r: string) => isOwner || roleList.includes(r);
+
+    const first: Tab | null =
+      (has('deposit') && 'deposits') ||
+      (has('withdraw') && 'withdraws') ||
+      (has('password_reset') && 'password') ||
+      (has('player_search') && 'players') ||
+      (has('create_player') && 'create_player') ||
+      (has('tournaments') && 'tournaments') ||
       null;
 
-    setActiveTab(first as Tab | null);
+    setActiveTab(first);
   }, []);
 
   useEffect(() => {
     let mounted = true;
 
     const init = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
 
-      if (session?.user && mounted) {
-        setAdminEmail(session.user.email || '');
-        await loadRolesForCurrentSession();
+        if (session?.user && mounted) {
+          setAdminEmail(session.user.email || '');
+          await loadRolesForCurrentSession();
+        }
+      } catch {
+        // network problem — show the login form
       }
 
       if (mounted) setCheckingSession(false);
@@ -222,6 +253,8 @@ export default function AdminPage() {
       if (!check || (Array.isArray(check) && check.length === 0)) {
         setLoginError('This account has no admin access.');
       }
+    } catch (err: any) {
+      setLoginError(err?.message || 'Network error. Check your internet and try again.');
     } finally {
       setLoginBusy(false);
       setLoginPassword('');
@@ -402,7 +435,7 @@ export default function AdminPage() {
     }
   };
 
-  // ---------------- Player search (owner) ----------------
+  // ---------------- Player search ----------------
 
   const searchPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -429,10 +462,13 @@ export default function AdminPage() {
     setLastResetResult(null);
     try {
       const result = await authedFetch('/api/admin/reset-password', {
-        user_uid: resetUid.trim(),
+        identifier: resetIdentifier.trim(),
+        new_password: resetNewPassword.trim() || undefined,
       });
-      setLastResetResult({ uid: resetUid.trim(), password: result.temp_password });
-      notify('Password reset. Share the new password with the player securely.');
+      setLastResetResult({ uid: result.player_uid, password: result.temp_password });
+      setResetIdentifier('');
+      setResetNewPassword('');
+      notify('Password reset done. Share the new password with the player.');
     } catch (err: any) {
       notify(err?.message || 'Password reset failed.', 'error');
     } finally {
@@ -447,7 +483,9 @@ export default function AdminPage() {
     try {
       const { data, error } = await supabase.rpc('admin_list_workers');
       if (error) throw error;
-      setWorkers((data || []) as Worker[]);
+      const list = (data || []) as Worker[];
+      setWorkers(list);
+      setWorkerRoleDraft(Object.fromEntries(list.map((w) => [w.id, [...w.roles]])));
     } catch (err: any) {
       notify(err?.message || 'Could not load workers.', 'error');
     } finally {
@@ -461,8 +499,44 @@ export default function AdminPage() {
     );
   };
 
+  const toggleWorkerDraftRole = (workerId: string, role: string) => {
+    setWorkerRoleDraft((prev) => {
+      const current = prev[workerId] || [];
+      const next = current.includes(role) ? current.filter((r) => r !== role) : [...current, role];
+      return { ...prev, [workerId]: next };
+    });
+  };
+
+  const saveWorkerRoles = async (workerId: string) => {
+    const next = workerRoleDraft[workerId] || [];
+    if (next.length === 0) {
+      notify('Select at least one permission (or use Remove).', 'error');
+      return;
+    }
+    if (next.includes('owner') && !window.confirm('Owner gives FULL access to everything. Continue?')) {
+      return;
+    }
+    setSavingWorkerId(workerId);
+    try {
+      const { error } = await supabase.rpc('admin_set_worker_roles', {
+        p_admin_id: workerId,
+        p_roles: next,
+      });
+      if (error) throw error;
+      notify('Permissions updated.');
+      await fetchWorkers();
+    } catch (err: any) {
+      notify(err?.message || 'Could not update permissions.', 'error');
+    } finally {
+      setSavingWorkerId(null);
+    }
+  };
+
   const createWorker = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (newWorkerRoles.includes('owner') && !window.confirm('Owner gives FULL access to everything. Continue?')) {
+      return;
+    }
     setCreatingWorker(true);
     setLastCreatedWorker(null);
     try {
@@ -494,7 +568,7 @@ export default function AdminPage() {
     }
   };
 
-  // ---------------- Create player (owner) ----------------
+  // ---------------- Create player ----------------
 
   const createPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -502,8 +576,10 @@ export default function AdminPage() {
     setLastCreatedPlayer(null);
     try {
       const result = await authedFetch('/api/admin/create-player', {
-        email: newPlayerEmail.trim(),
         full_name: newPlayerName.trim(),
+        nickname: newPlayerNickname.trim(),
+        email: newPlayerEmail.trim(),
+        password: newPlayerPassword.trim(),
         phone: newPlayerPhone.trim(),
       });
       setLastCreatedPlayer({
@@ -512,9 +588,11 @@ export default function AdminPage() {
         password: result.temp_password,
       });
       setNewPlayerName('');
+      setNewPlayerNickname('');
       setNewPlayerEmail('');
+      setNewPlayerPassword('');
       setNewPlayerPhone('');
-      notify('Player account created. Share login details securely.');
+      notify('Player account created. Share the login details with the player.');
     } catch (err: any) {
       notify(err?.message || 'Could not create player.', 'error');
     } finally {
@@ -522,7 +600,7 @@ export default function AdminPage() {
     }
   };
 
-  // ---------------- Tournaments monitor (owner) ----------------
+  // ---------------- Tournaments monitor ----------------
 
   const fetchTournamentsAdmin = useCallback(async () => {
     setLoadingTournaments(true);
@@ -542,16 +620,7 @@ export default function AdminPage() {
     if (activeTab === 'withdraws') void fetchWithdraws();
     if (activeTab === 'workers') void fetchWorkers();
     if (activeTab === 'tournaments') void fetchTournamentsAdmin();
-  }, [
-    isLoggedIn,
-    activeTab,
-    fetchDeposits,
-    fetchWithdraws,
-    fetchWorkers,
-    fetchTournamentsAdmin,
-  ]);
-
-  const canSee = (role: string) => roles.includes(role) || roles.includes('owner');
+  }, [isLoggedIn, activeTab, fetchDeposits, fetchWithdraws, fetchWorkers, fetchTournamentsAdmin]);
 
   if (checkingSession) {
     return (
@@ -609,6 +678,9 @@ export default function AdminPage() {
     );
   }
 
+  const inputCls =
+    'w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none';
+
   return (
     <div className="min-h-screen bg-[#0B0F19] p-4 text-white">
       {toast && (
@@ -657,12 +729,12 @@ export default function AdminPage() {
               Password Reset
             </TabButton>
           )}
-          {roles.includes('owner') && (
+          {canSee('player_search') && (
             <TabButton active={activeTab === 'players'} onClick={() => setActiveTab('players')}>
               Player Search
             </TabButton>
           )}
-          {roles.includes('owner') && (
+          {canSee('create_player') && (
             <TabButton
               active={activeTab === 'create_player'}
               onClick={() => setActiveTab('create_player')}
@@ -670,7 +742,7 @@ export default function AdminPage() {
               Create Player
             </TabButton>
           )}
-          {roles.includes('owner') && (
+          {canSee('tournaments') && (
             <TabButton
               active={activeTab === 'tournaments'}
               onClick={() => setActiveTab('tournaments')}
@@ -700,7 +772,7 @@ export default function AdminPage() {
                   value={manualUid}
                   onChange={(e) => setManualUid(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                  className={inputCls}
                 />
                 <input
                   type="number"
@@ -709,14 +781,14 @@ export default function AdminPage() {
                   value={manualAmount}
                   onChange={(e) => setManualAmount(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                  className={inputCls}
                 />
                 <input
                   type="text"
                   placeholder="Note (optional, e.g. 'cash handed in person')"
                   value={manualNote}
                   onChange={(e) => setManualNote(e.target.value)}
-                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                  className={inputCls}
                 />
                 <button
                   type="submit"
@@ -842,7 +914,7 @@ export default function AdminPage() {
                   <p className="col-span-2">Date: {formatDate(req.created_at)}</p>
                 </div>
                 {req.qr_path && (
-                  <p className="mt-2 text-[11px] text-gray-500 break-all">QR path: {req.qr_path}</p>
+                  <p className="mt-2 break-all text-[11px] text-gray-500">QR path: {req.qr_path}</p>
                 )}
                 {req.status === 'Processing' && (
                   <div className="mt-3 flex flex-col gap-2">
@@ -884,15 +956,26 @@ export default function AdminPage() {
         {/* PASSWORD RESET */}
         {activeTab === 'password' && canSee('password_reset') && (
           <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-            <h2 className="mb-4 text-sm font-black text-cyan-300">RESET PLAYER PASSWORD</h2>
-            <form onSubmit={resetPassword} className="flex flex-col gap-3 sm:flex-row">
+            <h2 className="mb-1 text-sm font-black text-cyan-300">RESET PLAYER PASSWORD</h2>
+            <p className="mb-4 text-[11px] text-gray-400">
+              Enter the player&apos;s UID <b>or</b> their Gmail. New password is optional — if you
+              leave it empty, a random one is made.
+            </p>
+            <form onSubmit={resetPassword} className="flex flex-col gap-3">
               <input
                 type="text"
-                placeholder="Player UID (e.g. AN-99B5EA1A)"
-                value={resetUid}
-                onChange={(e) => setResetUid(e.target.value)}
+                placeholder="Player UID (AN-99B5EA1A) or Gmail"
+                value={resetIdentifier}
+                onChange={(e) => setResetIdentifier(e.target.value)}
                 required
-                className="min-w-0 flex-1 rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                className={inputCls}
+              />
+              <input
+                type="text"
+                placeholder="New password (optional, min 6 characters)"
+                value={resetNewPassword}
+                onChange={(e) => setResetNewPassword(e.target.value)}
+                className={inputCls}
               />
               <button
                 type="submit"
@@ -912,15 +995,15 @@ export default function AdminPage() {
                   {lastResetResult.password}
                 </p>
                 <p className="mt-2 text-[10px] text-gray-400">
-                  Send this to the player over WhatsApp now — it will not be shown again.
+                  Send this to the player on WhatsApp now — it will not be shown again.
                 </p>
               </div>
             )}
           </section>
         )}
 
-        {/* PLAYER SEARCH (owner) */}
-        {activeTab === 'players' && roles.includes('owner') && (
+        {/* PLAYER SEARCH */}
+        {activeTab === 'players' && canSee('player_search') && (
           <section className="flex flex-col gap-4">
             <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
               <h2 className="mb-4 text-sm font-black text-cyan-300">PLAYER SEARCH</h2>
@@ -946,43 +1029,17 @@ export default function AdminPage() {
             {playerResult?.profile && (
               <div className="rounded-2xl border border-cyan-500/20 bg-gray-900 p-5">
                 <h3 className="mb-3 text-sm font-black text-cyan-300">
-                  {playerResult.profile.nickname ||
-                    playerResult.profile.full_name ||
-                    'Player'}
+                  {playerResult.profile.nickname || playerResult.profile.full_name || 'Player'}
                 </h3>
                 <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-                  <Stat
-                    label="Red Diamonds"
-                    value={playerResult.profile.red_diamonds}
-                    color="text-red-300"
-                  />
-                  <Stat
-                    label="White Diamonds"
-                    value={playerResult.profile.white_diamonds}
-                    color="text-cyan-300"
-                  />
-                  <Stat
-                    label="Winning Cash"
-                    value={`NPR ${playerResult.profile.winning_cash}`}
-                    color="text-green-300"
-                  />
-                  <Stat
-                    label="Deposit Requests"
-                    value={playerResult.deposit_count}
-                    color="text-yellow-300"
-                  />
-                  <Stat
-                    label="Withdraw Requests"
-                    value={playerResult.withdraw_count}
-                    color="text-pink-300"
-                  />
+                  <Stat label="Red Diamonds" value={playerResult.profile.red_diamonds} color="text-red-300" />
+                  <Stat label="White Diamonds" value={playerResult.profile.white_diamonds} color="text-cyan-300" />
+                  <Stat label="Winning Cash" value={`NPR ${playerResult.profile.winning_cash}`} color="text-green-300" />
+                  <Stat label="Deposit Requests" value={playerResult.deposit_count} color="text-yellow-300" />
+                  <Stat label="Withdraw Requests" value={playerResult.withdraw_count} color="text-pink-300" />
                   <Stat
                     label="Phone"
-                    value={
-                      playerResult.profile.mobile_number ||
-                      playerResult.profile.phone ||
-                      '—'
-                    }
+                    value={playerResult.profile.mobile_number || playerResult.profile.phone || '—'}
                     color="text-gray-300"
                   />
                 </div>
@@ -991,37 +1048,61 @@ export default function AdminPage() {
           </section>
         )}
 
-        {/* CREATE PLAYER (owner) */}
-        {activeTab === 'create_player' && roles.includes('owner') && (
+        {/* CREATE PLAYER */}
+        {activeTab === 'create_player' && canSee('create_player') && (
           <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
             <h2 className="mb-1 text-sm font-black text-cyan-300">CREATE PLAYER ACCOUNT</h2>
             <p className="mb-4 text-[11px] text-gray-400">
-              Create a new player login (email + temp password + Game UID). Share details on
-              WhatsApp only once.
+              Make a new player ID for someone who cannot register by themselves. The player gets a
+              new Game UID and logs in with this Gmail + password. Starts with 0 diamonds.
             </p>
             <form onSubmit={createPlayer} className="flex flex-col gap-3">
               <input
                 type="text"
-                placeholder="Full name"
+                placeholder="Full name (display name)"
                 value={newPlayerName}
                 onChange={(e) => setNewPlayerName(e.target.value)}
                 required
-                className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                className={inputCls}
+              />
+              <input
+                type="text"
+                placeholder="Nickname (in-game name)"
+                value={newPlayerNickname}
+                onChange={(e) => setNewPlayerNickname(e.target.value)}
+                required
+                className={inputCls}
               />
               <input
                 type="email"
-                placeholder="Player email / Gmail"
+                placeholder="Player Gmail / email"
                 value={newPlayerEmail}
                 onChange={(e) => setNewPlayerEmail(e.target.value)}
                 required
-                className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                className={inputCls}
               />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Password (min 6) — or press Generate"
+                  value={newPlayerPassword}
+                  onChange={(e) => setNewPlayerPassword(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setNewPlayerPassword(randomPassword())}
+                  className="rounded-xl border border-gray-700 bg-black px-3 text-[11px] font-bold text-gray-200"
+                >
+                  Generate
+                </button>
+              </div>
               <input
                 type="tel"
                 placeholder="Phone number"
                 value={newPlayerPhone}
                 onChange={(e) => setNewPlayerPhone(e.target.value)}
-                className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                className={inputCls}
               />
               <button
                 type="submit"
@@ -1034,29 +1115,27 @@ export default function AdminPage() {
 
             {lastCreatedPlayer && (
               <div className="mt-4 rounded-xl border border-green-500/40 bg-green-950/40 p-4">
-                <p className="text-xs text-green-300 font-bold">Account created — send to player:</p>
+                <p className="text-xs font-bold text-green-300">Account created — send to player:</p>
                 <p className="mt-2 text-xs text-gray-300">
-                  Email:{' '}
-                  <b className="select-all text-white">{lastCreatedPlayer.email}</b>
+                  Gmail: <b className="select-all text-white">{lastCreatedPlayer.email}</b>
                 </p>
                 <p className="mt-1 text-xs text-gray-300">
-                  Game UID:{' '}
-                  <b className="select-all text-yellow-300">{lastCreatedPlayer.player_uid}</b>
+                  Game UID: <b className="select-all text-yellow-300">{lastCreatedPlayer.player_uid}</b>
                 </p>
                 <p className="mt-1 text-xs text-gray-300">Password:</p>
                 <p className="mt-0.5 select-all break-all text-lg font-black text-white">
                   {lastCreatedPlayer.password}
                 </p>
                 <p className="mt-2 text-[10px] text-gray-400">
-                  Player logs in with email + password. UID is their Game ID.
+                  Player opens the site → Login → Gmail + password. Shown only once.
                 </p>
               </div>
             )}
           </section>
         )}
 
-        {/* TOURNAMENTS MONITOR (owner) */}
-        {activeTab === 'tournaments' && roles.includes('owner') && (
+        {/* TOURNAMENTS MONITOR */}
+        {activeTab === 'tournaments' && canSee('tournaments') && (
           <section className="flex flex-col gap-3">
             <div className="flex items-center justify-between">
               <h2 className="text-sm font-black text-cyan-300">TOURNAMENT MONITOR</h2>
@@ -1075,10 +1154,7 @@ export default function AdminPage() {
             )}
 
             {tournamentRows.map((t) => (
-              <article
-                key={t.id}
-                className="rounded-2xl border border-gray-800 bg-gray-900 p-4"
-              >
+              <article key={t.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-sm font-black text-cyan-300">
                     {t.type_label} · {t.title}
@@ -1106,9 +1182,7 @@ export default function AdminPage() {
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setExpandedTournamentId((id) => (id === t.id ? null : t.id))
-                  }
+                  onClick={() => setExpandedTournamentId((id) => (id === t.id ? null : t.id))}
                   className="mt-3 rounded-lg border border-gray-700 bg-black/40 px-3 py-2 text-[11px] font-bold text-gray-200"
                 >
                   {expandedTournamentId === t.id ? 'Hide Top 10' : 'Show Top 10'}
@@ -1125,9 +1199,8 @@ export default function AdminPage() {
                           className="flex items-center justify-between rounded-lg border border-gray-800 bg-black/40 px-3 py-2 text-xs"
                         >
                           <span className="font-bold text-yellow-300">#{r.rank}</span>
-                          <span className="flex-1 px-2 text-white truncate">
-                            {r.name}{' '}
-                            <span className="text-gray-500">({r.uid})</span>
+                          <span className="flex-1 truncate px-2 text-white">
+                            {r.name} <span className="text-gray-500">({r.uid})</span>
                           </span>
                           <span className="font-black text-cyan-300">{r.score} pts</span>
                         </div>
@@ -1140,11 +1213,14 @@ export default function AdminPage() {
           </section>
         )}
 
-        {/* MANAGE WORKERS (owner) */}
+        {/* MANAGE WORKERS (owner only) */}
         {activeTab === 'workers' && roles.includes('owner') && (
           <section className="flex flex-col gap-4">
             <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              <h2 className="mb-4 text-sm font-black text-cyan-300">ADD NEW WORKER</h2>
+              <h2 className="mb-1 text-sm font-black text-cyan-300">ADD NEW WORKER</h2>
+              <p className="mb-4 text-[11px] text-gray-400">
+                Choose exactly which tabs this worker can open. They only see what you tick.
+              </p>
               <form onSubmit={createWorker} className="flex flex-col gap-3">
                 <input
                   type="email"
@@ -1152,21 +1228,21 @@ export default function AdminPage() {
                   value={newWorkerEmail}
                   onChange={(e) => setNewWorkerEmail(e.target.value)}
                   required
-                  className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                  className={inputCls}
                 />
                 <div className="flex flex-wrap gap-2">
-                  {['deposit', 'withdraw', 'password_reset', 'owner'].map((role) => (
+                  {PERMISSIONS.map((p) => (
                     <button
-                      key={role}
+                      key={p.key}
                       type="button"
-                      onClick={() => toggleNewWorkerRole(role)}
+                      onClick={() => toggleNewWorkerRole(p.key)}
                       className={`rounded-lg px-3 py-2 text-[11px] font-bold ${
-                        newWorkerRoles.includes(role)
+                        newWorkerRoles.includes(p.key)
                           ? 'bg-yellow-500 text-black'
                           : 'border border-gray-700 bg-black text-gray-300'
                       }`}
                     >
-                      {ROLE_LABELS[role]}
+                      {p.label}
                     </button>
                   ))}
                 </div>
@@ -1188,8 +1264,8 @@ export default function AdminPage() {
                     {lastCreatedWorker.password}
                   </p>
                   <p className="mt-2 text-[10px] text-gray-400">
-                    Send this login (email + password) to them over WhatsApp — it will not be
-                    shown again.
+                    Send this login (email + password) on WhatsApp — it will not be shown again.
+                    Worker logs in at /admin.
                   </p>
                 </div>
               )}
@@ -1197,7 +1273,7 @@ export default function AdminPage() {
 
             <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
               <div className="mb-3 flex items-center justify-between">
-                <h2 className="text-sm font-black text-cyan-300">CURRENT WORKERS</h2>
+                <h2 className="text-sm font-black text-cyan-300">CURRENT WORKERS — CHANGE PERMISSIONS</h2>
                 <button
                   onClick={() => void fetchWorkers()}
                   className="rounded-lg border border-gray-700 bg-black px-3 py-2 text-xs font-bold text-gray-200"
@@ -1206,25 +1282,50 @@ export default function AdminPage() {
                 </button>
               </div>
 
-              {workers.map((w) => (
-                <div
-                  key={w.id}
-                  className="mb-2 flex items-center justify-between rounded-xl border border-gray-800 bg-black/40 p-3"
-                >
-                  <div>
-                    <p className="text-xs font-bold text-white">{w.email}</p>
-                    <p className="text-[10px] text-gray-400">
-                      {w.roles.map((r) => ROLE_LABELS[r] || r).join(', ')}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => void removeWorker(w.id)}
-                    className="rounded-lg border border-red-500/40 bg-red-600/15 px-3 py-1.5 text-[10px] font-bold text-red-300"
+              {workers.map((w) => {
+                const draft = workerRoleDraft[w.id] || [];
+                const changed =
+                  draft.length !== w.roles.length || draft.some((r) => !w.roles.includes(r));
+                return (
+                  <div
+                    key={w.id}
+                    className="mb-3 rounded-xl border border-gray-800 bg-black/40 p-3"
                   >
-                    Remove
-                  </button>
-                </div>
-              ))}
+                    <p className="text-xs font-bold text-white">{w.email}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {PERMISSIONS.map((p) => (
+                        <button
+                          key={p.key}
+                          type="button"
+                          onClick={() => toggleWorkerDraftRole(w.id, p.key)}
+                          className={`rounded-lg px-2.5 py-1.5 text-[10px] font-bold ${
+                            draft.includes(p.key)
+                              ? 'bg-yellow-500 text-black'
+                              : 'border border-gray-700 bg-black text-gray-400'
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-2.5 flex gap-2">
+                      <button
+                        onClick={() => void saveWorkerRoles(w.id)}
+                        disabled={!changed || savingWorkerId === w.id}
+                        className="rounded-lg bg-cyan-500 px-3 py-1.5 text-[10px] font-black text-black disabled:opacity-40"
+                      >
+                        {savingWorkerId === w.id ? 'Saving…' : 'Save permissions'}
+                      </button>
+                      <button
+                        onClick={() => void removeWorker(w.id)}
+                        className="rounded-lg border border-red-500/40 bg-red-600/15 px-3 py-1.5 text-[10px] font-bold text-red-300"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
         )}
@@ -1264,3 +1365,4 @@ function Stat({ label, value, color }: { label: string; value: any; color: strin
     </div>
   );
 }
+
