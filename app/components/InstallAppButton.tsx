@@ -1,71 +1,119 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import {
-  initPWA,
-  installHint,
-  isStandalone,
-  promptInstall,
-  subscribeInstall,
-} from '@/lib/pwa';
 
-type Props = {
-  variant?: 'card' | 'button';
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
 };
 
-export default function InstallAppCard({ variant = 'card' }: Props) {
-  const [standalone, setStandalone] = useState(false);
-  const [hint, setHint] = useState('');
-  const [, force] = useState(0);
+function isIos(): boolean {
+  if (typeof window === 'undefined') return false;
+  const ua = window.navigator.userAgent.toLowerCase();
+  return /iphone|ipad|ipod/.test(ua);
+}
+
+function isStandalone(): boolean {
+  if (typeof window === 'undefined') return false;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
+  return (
+    window.matchMedia('(display-mode: standalone)').matches ||
+    nav.standalone === true
+  );
+}
+
+export default function InstallAppButton({
+  className = '',
+}: {
+  className?: string;
+}) {
+  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(
+    null
+  );
+  const [installed, setInstalled] = useState(false);
+  const [showIosHelp, setShowIosHelp] = useState(false);
 
   useEffect(() => {
-    initPWA();
-    setStandalone(isStandalone());
-    return subscribeInstall(() => force((n) => n + 1));
+    if (isStandalone()) {
+      setInstalled(true);
+      return;
+    }
+
+    const onBip = (e: Event) => {
+      e.preventDefault();
+      setDeferred(e as BeforeInstallPromptEvent);
+    };
+
+    const onInstalled = () => {
+      setInstalled(true);
+      setDeferred(null);
+    };
+
+    window.addEventListener('beforeinstallprompt', onBip);
+    window.addEventListener('appinstalled', onInstalled);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', onBip);
+      window.removeEventListener('appinstalled', onInstalled);
+    };
   }, []);
 
-  if (standalone) return null;
-
-  const handleInstall = async () => {
-    const result = await promptInstall();
-    if (result === 'unavailable') {
-      setHint(installHint());
-      window.setTimeout(() => setHint(''), 8000);
-    }
-  };
-
-  if (variant === 'button') {
+  if (installed) {
     return (
-      <div className="flex flex-col items-center">
-        <button
-          type="button"
-          onClick={handleInstall}
-          className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-2 text-[11px] font-bold text-cyan-300 hover:bg-cyan-500/20"
-        >
-          📲 Install App
-        </button>
-        {hint && <p className="mt-1 max-w-[220px] text-center text-[10px] text-gray-400">{hint}</p>}
+      <div
+        className={`rounded-xl border border-green-500/40 bg-green-950/40 px-3 py-2.5 text-center text-[11px] font-bold text-green-300 ${className}`}
+      >
+        ✓ App already installed
       </div>
     );
   }
 
+  const handleClick = async () => {
+    if (deferred) {
+      await deferred.prompt();
+      const choice = await deferred.userChoice;
+      if (choice.outcome === 'accepted') {
+        setInstalled(true);
+      }
+      setDeferred(null);
+      return;
+    }
+
+    if (isIos()) {
+      setShowIosHelp(true);
+      return;
+    }
+
+    alert(
+      'To install:\n\nChrome menu (⋮) → "Install app" or "Add to Home screen".\n\nOpen the site on Chrome Android for best result.'
+    );
+  };
+
   return (
-    <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-cyan-500/30 bg-gradient-to-r from-cyan-500/10 to-blue-600/10 p-3.5">
-      <div className="min-w-0">
-        <h3 className="text-xs font-black text-white">📲 Install Arena Nepal App</h3>
-        <p className="mt-0.5 text-[10px] text-gray-400">
-          Home screen se seedha kholo — fast aur full screen.
-        </p>
-        {hint && <p className="mt-1 text-[10px] text-cyan-300">{hint}</p>}
-      </div>
+    <div className={className}>
       <button
         type="button"
-        onClick={handleInstall}
-        className="shrink-0 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 px-3.5 py-2 text-[11px] font-black text-black active:scale-95"
+        onClick={() => void handleClick()}
+        className="w-full rounded-xl bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-600 py-3 text-xs font-black text-white shadow-[0_0_20px_rgba(34,211,238,0.35)] active:scale-[0.99] transition-all"
       >
-        Install
+        📥 Install Arena Nepal App
       </button>
+
+      {showIosHelp && (
+        <div className="mt-2 rounded-xl border border-cyan-500/30 bg-black/50 p-3 text-[10px] text-gray-300 leading-relaxed">
+          <p className="font-bold text-cyan-300 mb-1">iPhone / iPad:</p>
+          <p>
+            Safari → Share button → <b>Add to Home Screen</b> → Add
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowIosHelp(false)}
+            className="mt-2 text-gray-500 underline"
+          >
+            Close
+          </button>
+        </div>
+      )}
     </div>
   );
 }
-
