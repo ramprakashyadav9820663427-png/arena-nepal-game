@@ -2,6 +2,8 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import InstallAppCard from '@/components/InstallAppCard';
+import { initPWA } from '@/lib/pwa';
 
 const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
 const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
@@ -161,6 +163,7 @@ export default function AdminPage() {
   const [newPlayerPassword, setNewPlayerPassword] = useState('');
   const [newPlayerPhone, setNewPlayerPhone] = useState('');
   const [creatingPlayer, setCreatingPlayer] = useState(false);
+  const [playerFieldErrors, setPlayerFieldErrors] = useState<Record<string, string>>({});
   const [lastCreatedPlayer, setLastCreatedPlayer] = useState<{
     email: string;
     player_uid: string;
@@ -173,6 +176,18 @@ export default function AdminPage() {
   const [expandedTournamentId, setExpandedTournamentId] = useState<string | null>(null);
 
   const canSee = (role: string) => roles.includes(role) || roles.includes('owner');
+
+  // Make the admin panel installable as its own app (separate name + start page).
+  useEffect(() => {
+    initPWA();
+    let link = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+    if (!link) {
+      link = document.createElement('link');
+      link.rel = 'manifest';
+      document.head.appendChild(link);
+    }
+    link.href = '/admin.webmanifest';
+  }, []);
 
   const loadRolesForCurrentSession = useCallback(async () => {
     const { data, error } = await supabase.rpc('get_my_admin_roles');
@@ -570,8 +585,34 @@ export default function AdminPage() {
 
   // ---------------- Create player ----------------
 
+  const validatePlayerForm = () => {
+    const errors: Record<string, string> = {};
+    const name = newPlayerName.trim();
+    const nickname = newPlayerNickname.trim();
+    const email = newPlayerEmail.trim();
+    const password = newPlayerPassword.trim();
+    const phone = newPlayerPhone.trim();
+
+    if (!name) errors.name = 'Full name likho.';
+    if (!nickname) errors.nickname = 'Nickname likho.';
+    if (!email) errors.email = 'Gmail/email likho.';
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.email = 'Sahi email daalo.';
+    if (password && password.length < 6) errors.password = 'Password kam se kam 6 letter ka ho.';
+    if (!phone) errors.phone = 'Phone number likho.';
+    else if (!/^\d{7,15}$/.test(phone.replace(/[\s-]/g, ''))) errors.phone = 'Sahi phone number daalo.';
+
+    setPlayerFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
   const createPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!validatePlayerForm()) {
+      notify('Laal dikh rahe fields sahi se bharo.', 'error');
+      return;
+    }
+
     setCreatingPlayer(true);
     setLastCreatedPlayer(null);
     try {
@@ -592,6 +633,7 @@ export default function AdminPage() {
       setNewPlayerEmail('');
       setNewPlayerPassword('');
       setNewPlayerPhone('');
+      setPlayerFieldErrors({});
       notify('Player account created. Share the login details with the player.');
     } catch (err: any) {
       notify(err?.message || 'Could not create player.', 'error');
@@ -673,6 +715,10 @@ export default function AdminPage() {
               {loginBusy ? 'Signing in...' : 'Login'}
             </button>
           </form>
+
+          <div className="mt-4 flex justify-center">
+            <InstallAppCard variant="button" />
+          </div>
         </div>
       </div>
     );
@@ -705,12 +751,15 @@ export default function AdminPage() {
               {adminEmail} · {roles.map((r) => ROLE_LABELS[r] || r).join(', ')}
             </p>
           </div>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <InstallAppCard variant="button" />
           <button
             onClick={handleLogout}
-            className="self-start rounded-xl border border-red-500/40 bg-red-600/20 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-600 hover:text-white sm:self-auto"
+            className="rounded-xl border border-red-500/40 bg-red-600/20 px-4 py-2 text-xs font-bold text-red-300 hover:bg-red-600 hover:text-white"
           >
             Logout
           </button>
+          </div>
         </div>
 
         <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
@@ -1056,54 +1105,109 @@ export default function AdminPage() {
               Make a new player ID for someone who cannot register by themselves. The player gets a
               new Game UID and logs in with this Gmail + password. Starts with 0 diamonds.
             </p>
-            <form onSubmit={createPlayer} className="flex flex-col gap-3">
-              <input
-                type="text"
-                placeholder="Full name (display name)"
-                value={newPlayerName}
-                onChange={(e) => setNewPlayerName(e.target.value)}
-                required
-                className={inputCls}
-              />
-              <input
-                type="text"
-                placeholder="Nickname (in-game name)"
-                value={newPlayerNickname}
-                onChange={(e) => setNewPlayerNickname(e.target.value)}
-                required
-                className={inputCls}
-              />
-              <input
-                type="email"
-                placeholder="Player Gmail / email"
-                value={newPlayerEmail}
-                onChange={(e) => setNewPlayerEmail(e.target.value)}
-                required
-                className={inputCls}
-              />
-              <div className="flex gap-2">
+            <form onSubmit={createPlayer} noValidate className="flex flex-col gap-3">
+              <div>
                 <input
                   type="text"
-                  placeholder="Password (min 6) — or press Generate"
-                  value={newPlayerPassword}
-                  onChange={(e) => setNewPlayerPassword(e.target.value)}
-                  className="min-w-0 flex-1 rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none"
+                  placeholder="Full name (display name)"
+                  value={newPlayerName}
+                  onChange={(e) => {
+                    setNewPlayerName(e.target.value);
+                    if (playerFieldErrors.name) setPlayerFieldErrors((p) => ({ ...p, name: '' }));
+                  }}
+                  className={`${inputCls} ${
+                    playerFieldErrors.name ? 'border-red-500 focus:border-red-500' : ''
+                  }`}
                 />
-                <button
-                  type="button"
-                  onClick={() => setNewPlayerPassword(randomPassword())}
-                  className="rounded-xl border border-gray-700 bg-black px-3 text-[11px] font-bold text-gray-200"
-                >
-                  Generate
-                </button>
+                {playerFieldErrors.name && (
+                  <p className="mt-1 text-[10px] font-bold text-red-400">{playerFieldErrors.name}</p>
+                )}
               </div>
-              <input
-                type="tel"
-                placeholder="Phone number"
-                value={newPlayerPhone}
-                onChange={(e) => setNewPlayerPhone(e.target.value)}
-                className={inputCls}
-              />
+
+              <div>
+                <input
+                  type="text"
+                  placeholder="Nickname (in-game name)"
+                  value={newPlayerNickname}
+                  onChange={(e) => {
+                    setNewPlayerNickname(e.target.value);
+                    if (playerFieldErrors.nickname) setPlayerFieldErrors((p) => ({ ...p, nickname: '' }));
+                  }}
+                  className={`${inputCls} ${
+                    playerFieldErrors.nickname ? 'border-red-500 focus:border-red-500' : ''
+                  }`}
+                />
+                {playerFieldErrors.nickname && (
+                  <p className="mt-1 text-[10px] font-bold text-red-400">{playerFieldErrors.nickname}</p>
+                )}
+              </div>
+
+              <div>
+                <input
+                  type="email"
+                  placeholder="Player Gmail / email"
+                  value={newPlayerEmail}
+                  onChange={(e) => {
+                    setNewPlayerEmail(e.target.value);
+                    if (playerFieldErrors.email) setPlayerFieldErrors((p) => ({ ...p, email: '' }));
+                  }}
+                  className={`${inputCls} ${
+                    playerFieldErrors.email ? 'border-red-500 focus:border-red-500' : ''
+                  }`}
+                />
+                {playerFieldErrors.email && (
+                  <p className="mt-1 text-[10px] font-bold text-red-400">{playerFieldErrors.email}</p>
+                )}
+              </div>
+
+              <div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Password (min 6) — or press Generate"
+                    value={newPlayerPassword}
+                    onChange={(e) => {
+                      setNewPlayerPassword(e.target.value);
+                      if (playerFieldErrors.password) setPlayerFieldErrors((p) => ({ ...p, password: '' }));
+                    }}
+                    className={`min-w-0 flex-1 rounded-xl border bg-black p-3 text-xs text-white outline-none ${
+                      playerFieldErrors.password ? 'border-red-500 focus:border-red-500' : 'border-gray-800'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewPlayerPassword(randomPassword());
+                      if (playerFieldErrors.password) setPlayerFieldErrors((p) => ({ ...p, password: '' }));
+                    }}
+                    className="rounded-xl border border-gray-700 bg-black px-3 text-[11px] font-bold text-gray-200"
+                  >
+                    Generate
+                  </button>
+                </div>
+                {playerFieldErrors.password && (
+                  <p className="mt-1 text-[10px] font-bold text-red-400">{playerFieldErrors.password}</p>
+                )}
+              </div>
+
+              <div>
+                <input
+                  type="tel"
+                  placeholder="Phone number"
+                  value={newPlayerPhone}
+                  onChange={(e) => {
+                    setNewPlayerPhone(e.target.value);
+                    if (playerFieldErrors.phone) setPlayerFieldErrors((p) => ({ ...p, phone: '' }));
+                  }}
+                  className={`${inputCls} ${
+                    playerFieldErrors.phone ? 'border-red-500 focus:border-red-500' : ''
+                  }`}
+                />
+                {playerFieldErrors.phone && (
+                  <p className="mt-1 text-[10px] font-bold text-red-400">{playerFieldErrors.phone}</p>
+                )}
+              </div>
+
               <button
                 type="submit"
                 disabled={creatingPlayer}
