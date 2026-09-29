@@ -467,7 +467,7 @@ export default function GameSection({ wallet, setWallet, onBackToLobby }: GameSe
   }
 
   return (
-    <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-3 sm:p-4 flex flex-col items-center shadow-2xl relative overflow-hidden select-none">
+    <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-3 sm:p-4 flex flex-col items-center shadow-2xl relative overflow-hidden select-none mb-24">
       <div className="w-full flex justify-between items-center mb-3 gap-2">
         <button
           onClick={() => setActiveGame('LOBBY')}
@@ -595,4 +595,3 @@ export default function GameSection({ wallet, setWallet, onBackToLobby }: GameSe
     </div>
   );
 }
-

@@ -11,6 +11,8 @@ import CarRacingGame from '@/components/game/CarRacingGame';
 import LudoGotiSprint from '@/components/game/LudoGotiSprint';
 import ArenaSpinnerWinner from '@/components/game/ArenaSpinnerWinner';
 import JhandiMundaGame from '@/components/game/JhandiMundaGame';
+import NeonSkyRunner from '@/components/game/NeonSkyRunner';
+import BlockStackMaster from '@/components/game/BlockStackMaster';
 import TournamentSection from '@/components/TournamentSection';
 import WalletSection from '@/components/WalletSection';
 import RankSection from '@/components/RankSection';
@@ -75,6 +77,22 @@ const GAMES_LIST = [
     name: 'Diamond Collector',
     tag: 'FREE PLAY',
     thumbnail: '/thumbnails/neon.jpg',
+    category: 'free',
+    accent: 'cyan'
+  },
+  {
+    id: 'skyrunner',
+    name: 'Neon Sky Runner',
+    tag: 'FREE PLAY',
+    thumbnail: '/thumbnails/neon-sky-runner.jpg',
+    category: 'free',
+    accent: 'cyan'
+  },
+  {
+    id: 'stackmaster',
+    name: 'Block Stack Master',
+    tag: 'FREE PLAY',
+    thumbnail: '/thumbnails/block-stack-master.jpg',
     category: 'free',
     accent: 'cyan'
   },
@@ -595,7 +613,7 @@ export default function Home() {
   const filteredGames = GAMES_LIST.filter((game) => {
     if (gameCategory === 'all') return true;
     if (gameCategory === 'free') {
-      return game.id === 'neon';
+      return game.category === 'free';
     }
     return game.category === 'popular';
   });
@@ -747,7 +765,6 @@ export default function Home() {
           <>
             {selectedGame ? (
               <div className="flex flex-col gap-3">
-                {/* Back to Lobby button - every game */}
                 <button
                   onClick={() => setSelectedGame(null)}
                   className="flex w-fit items-center gap-2 rounded-xl border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-bold text-white transition hover:border-yellow-400/40 hover:bg-yellow-400/10 hover:text-yellow-300 active:scale-95"
@@ -763,6 +780,14 @@ export default function Home() {
                   <RockPaperScissors />
                 ) : selectedGame === 'neon' ? (
                   <GameSection />
+                ) : selectedGame === 'skyrunner' ? (
+                  <NeonSkyRunner
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : selectedGame === 'stackmaster' ? (
+                  <BlockStackMaster
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
                 ) : selectedGame === 'teenpatti' ? (
                   <TeenPattiBattle
                     onBackToLobby={() => setSelectedGame(null)}
@@ -942,7 +967,9 @@ export default function Home() {
                       {
                         id: 'free' as const,
                         label: '💎 Free Games',
-                        count: 1
+                        count: GAMES_LIST.filter(
+                          (g) => g.category === 'free'
+                        ).length
                       }
                     ].map((category) => (
                       <button
