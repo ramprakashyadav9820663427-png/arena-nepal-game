@@ -9,9 +9,10 @@ interface UserWallet {
 interface GameSectionProps {
   wallet?: UserWallet;
   setWallet?: React.Dispatch<React.SetStateAction<UserWallet>> | any;
+  onBackToLobby?: () => void;
 }
 
-export default function GameSection({ wallet, setWallet }: GameSectionProps) {
+export default function GameSection({ wallet, setWallet, onBackToLobby }: GameSectionProps) {
   const [isMounted, setIsMounted] = useState<boolean>(false);
   const [activeGame, setActiveGame] = useState<'LOBBY' | 'NEON'>('LOBBY');
 
@@ -437,6 +438,14 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
             </h2>
             <p className="text-[10px] text-gray-300">Play games & earn White Diamonds!</p>
           </div>
+          {onBackToLobby && (
+            <button
+              onClick={onBackToLobby}
+              className="shrink-0 px-3 py-1.5 bg-gray-800 text-gray-300 font-bold text-[11px] rounded-xl border border-gray-700 cursor-pointer"
+            >
+              ✕ Exit
+            </button>
+          )}
         </div>
         <div className="grid grid-cols-1 gap-3 w-full">
           <div className="bg-gray-900 border border-cyan-500/40 p-4 rounded-2xl flex flex-col justify-between shadow-lg">
@@ -458,15 +467,23 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
   }
 
   return (
-    <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-4 flex flex-col items-center shadow-2xl relative overflow-hidden select-none">
-      <div className="w-full flex justify-between items-center mb-3">
+    <div className="w-full max-w-md bg-gray-900 border border-purple-500/40 rounded-3xl p-3 sm:p-4 flex flex-col items-center shadow-2xl relative overflow-hidden select-none">
+      <div className="w-full flex justify-between items-center mb-3 gap-2">
         <button
           onClick={() => setActiveGame('LOBBY')}
-          className="px-3 py-1 bg-gray-800 text-gray-300 font-bold text-[11px] rounded-xl border border-gray-700 cursor-pointer"
+          className="px-3 py-1 bg-gray-800 text-gray-300 font-bold text-[11px] rounded-xl border border-gray-700 cursor-pointer shrink-0"
         >
           ← Lobby
         </button>
         <span className="text-xs font-black text-pink-400">🔥 Layer {layer}/7</span>
+        {onBackToLobby && (
+          <button
+            onClick={onBackToLobby}
+            className="px-3 py-1 bg-red-600/20 text-red-300 font-bold text-[11px] rounded-xl border border-red-500/40 cursor-pointer shrink-0"
+          >
+            ✕ Exit
+          </button>
+        )}
       </div>
 
       <div className="w-full flex justify-between items-center mb-3 bg-black/40 px-3 py-2 rounded-2xl border border-gray-800">
@@ -479,7 +496,7 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
         </div>
       </div>
 
-      <div className="relative w-[320px] h-[380px] bg-black rounded-2xl border border-cyan-500/30 overflow-hidden flex flex-col items-center justify-center">
+      <div className="relative w-full max-w-[320px] aspect-[320/380] bg-black rounded-2xl border border-cyan-500/30 overflow-hidden flex flex-col items-center justify-center mx-auto">
         {gameState === 'IDLE' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 z-10 p-4 text-center">
             <h2 className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-pink-400 to-cyan-400 mb-1">
@@ -534,7 +551,13 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
           </div>
         )}
 
-        <canvas ref={canvasRef} width={320} height={380} className="touch-none" />
+        <canvas
+          ref={canvasRef}
+          width={320}
+          height={380}
+          className="touch-none w-full h-full"
+          style={{ display: 'block' }}
+        />
       </div>
 
       <div className="w-full flex justify-between items-center gap-4 mt-3 px-2">
@@ -572,3 +595,4 @@ export default function GameSection({ wallet, setWallet }: GameSectionProps) {
     </div>
   );
 }
+

@@ -745,34 +745,46 @@ export default function Home() {
       <div className="relative z-10 mx-auto flex w-full max-w-6xl flex-col gap-5 px-3 py-4 sm:px-5 sm:py-6 lg:px-8">
         {activeTab === 'home' && (
           <>
-            {selectedGame === 'jhandimunda' ? (
-              <JhandiMundaGame />
-            ) : selectedGame === 'spin' ? (
-              <ArenaSpinnerWinner />
-            ) : selectedGame === 'rps' ? (
-              <RockPaperScissors />
-            ) : selectedGame === 'neon' ? (
-              <GameSection />
-            ) : selectedGame === 'teenpatti' ? (
-              <TeenPattiBattle
-                onBackToLobby={() => setSelectedGame(null)}
-              />
-            ) : selectedGame === 'onecard' ? (
-              <OneCardBattle
-                onBackToLobby={() => setSelectedGame(null)}
-              />
-            ) : selectedGame === 'rocket' ? (
-              <RocketCrashGame
-                onBackToLobby={() => setSelectedGame(null)}
-              />
-            ) : selectedGame === 'carracing' ? (
-              <CarRacingGame
-                onBackToLobby={() => setSelectedGame(null)}
-              />
-            ) : selectedGame === 'ludogoti' ? (
-              <LudoGotiSprint
-                onBackToLobby={() => setSelectedGame(null)}
-              />
+            {selectedGame ? (
+              <div className="flex flex-col gap-3">
+                {/* Back to Lobby button - every game */}
+                <button
+                  onClick={() => setSelectedGame(null)}
+                  className="flex w-fit items-center gap-2 rounded-xl border border-white/15 bg-white/[0.06] px-4 py-2.5 text-sm font-bold text-white transition hover:border-yellow-400/40 hover:bg-yellow-400/10 hover:text-yellow-300 active:scale-95"
+                >
+                  ← Back to Lobby
+                </button>
+
+                {selectedGame === 'jhandimunda' ? (
+                  <JhandiMundaGame />
+                ) : selectedGame === 'spin' ? (
+                  <ArenaSpinnerWinner />
+                ) : selectedGame === 'rps' ? (
+                  <RockPaperScissors />
+                ) : selectedGame === 'neon' ? (
+                  <GameSection />
+                ) : selectedGame === 'teenpatti' ? (
+                  <TeenPattiBattle
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : selectedGame === 'onecard' ? (
+                  <OneCardBattle
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : selectedGame === 'rocket' ? (
+                  <RocketCrashGame
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : selectedGame === 'carracing' ? (
+                  <CarRacingGame
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : selectedGame === 'ludogoti' ? (
+                  <LudoGotiSprint
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : null}
+              </div>
             ) : (
               <>
                 <section className="relative overflow-hidden rounded-3xl border border-yellow-500/25 bg-gradient-to-br from-[#20150a] via-[#100d18] to-[#090a13] p-4 shadow-[0_12px_45px_rgba(0,0,0,0.35)] sm:p-6">
