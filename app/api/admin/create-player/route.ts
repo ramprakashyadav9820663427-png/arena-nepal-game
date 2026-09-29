@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
 import { supabaseAdmin } from '@/lib/supabaseadmin';
 
+
 // Same formula as the SQL function compute_player_uid(id):
 // 'AN-' + first 8 hex chars of the user id, upper-case.
 function computePlayerUid(id: string) {
@@ -64,7 +65,7 @@ export async function POST(request: Request) {
       full_name: fullName,
       nickname,
       phone: phone || null,
-      uid: playerUid,
+      user_uid: playerUid,
       red_diamonds: 0,
       white_diamonds: 0,
       winning_cash: 0,
