@@ -6,7 +6,6 @@ import RockPaperScissors from '@/components/game/RockPaperScissors';
 import GameSection from '@/components/game/GameSection';
 import TeenPattiBattle from '@/components/game/TeenPattiBattle';
 import OneCardBattle from '@/components/game/OneCardBattle';
-import RocketCrashGame from '@/components/game/RocketCrashGame';
 import CarRacingGame from '@/components/game/CarRacingGame';
 import LudoGotiSprint from '@/components/game/LudoGotiSprint';
 import ArenaSpinnerWinner from '@/components/game/ArenaSpinnerWinner';
@@ -24,7 +23,6 @@ import { supabase } from '@/lib/supabase';
 
 const DUMMY_WINNERS = [
   "🔥 User 'Sam***' won 500 🔴 on Arena Spinner Winner!",
-  "🚀 User 'Deepak99' cashed out at 4.2x on Rocket Crash!",
   "🏆 User 'Pooja_X' won 1v1 Teen Patti Battle!",
   "🃏 User 'Rahul_K' won 1,900 Red Diamonds on One Card!",
   "🎲 User 'LudoKing_99' collected 3,500 Red Diamonds on Ludo Sprint!",
@@ -55,14 +53,6 @@ const GAMES_LIST = [
     thumbnail: '/thumbnails/teenpatti.jpg',
     category: 'popular',
     accent: 'yellow'
-  },
-  {
-    id: 'rocket',
-    name: 'Rocket Crash',
-    tag: '10X RUSH',
-    thumbnail: '/thumbnails/rocket.jpg',
-    category: 'popular',
-    accent: 'cyan'
   },
   {
     id: 'rps',
@@ -796,10 +786,6 @@ export default function Home() {
                   <OneCardBattle
                     onBackToLobby={() => setSelectedGame(null)}
                   />
-                ) : selectedGame === 'rocket' ? (
-                  <RocketCrashGame
-                    onBackToLobby={() => setSelectedGame(null)}
-                  />
                 ) : selectedGame === 'carracing' ? (
                   <CarRacingGame
                     onBackToLobby={() => setSelectedGame(null)}
@@ -1307,3 +1293,4 @@ export default function Home() {
     </main>
   );
 }
+
