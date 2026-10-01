@@ -1,4 +1,3 @@
-
 import type { Metadata } from 'next';
 import './globals.css';
 
@@ -74,7 +73,6 @@ export default function RootLayout({
   return (
     <html lang="en">
       <head>
-        <link rel="manifest" href="/manifest.json" />
         <meta name="theme-color" content="#050508" />
         <link rel="icon" href="/arena-nepal-logo.jpg" type="image/jpeg" />
         <link rel="shortcut icon" href="/arena-nepal-logo.jpg" />
@@ -94,3 +92,4 @@ export default function RootLayout({
     </html>
   );
 }
+

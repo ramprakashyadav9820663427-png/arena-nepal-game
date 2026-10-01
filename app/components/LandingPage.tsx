@@ -51,6 +51,19 @@ export default function LandingPage({ onOpenAuth }: LandingPageProps) {
     );
   };
 
+  const openGetIdWhatsApp = () => {
+    const text = [
+      'Arena Nepal - Get Game ID',
+      'Hello, I want a Game ID to play on Arena Nepal.',
+      'Please create an ID for me.',
+    ].join('\n');
+    window.open(
+      `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`,
+      '_blank',
+      'noopener,noreferrer'
+    );
+  };
+
   return (
     <main className="min-h-screen w-full bg-[#050508] text-white overflow-x-hidden">
       <div className="pointer-events-none fixed inset-0 z-0">
@@ -70,7 +83,7 @@ export default function LandingPage({ onOpenAuth }: LandingPageProps) {
           ARENA NEPAL
         </h1>
         <p className="mt-2 text-sm text-gray-300 max-w-xs">
-          Nepal's Premier Gaming &amp; Skill-Based Rewards Platform 🏆
+          Nepal&apos;s Premier Gaming &amp; Skill-Based Rewards Platform 🏆
         </p>
 
         <div className="mt-7 w-full max-w-xs flex flex-col gap-3">
@@ -89,15 +102,22 @@ export default function LandingPage({ onOpenAuth }: LandingPageProps) {
           </button>
 
           <button
+            onClick={openGetIdWhatsApp}
+            className="w-full py-3.5 rounded-2xl font-black text-sm border border-yellow-500/40 bg-yellow-500/10 text-yellow-300 hover:bg-yellow-500/20 active:scale-[0.98] transition-all cursor-pointer"
+          >
+            🎫 GET ID
+          </button>
+
+          <button
             onClick={onOpenAuth}
             className="w-full py-3.5 rounded-2xl font-black text-sm border border-white/20 bg-white/5 text-white hover:bg-white/10 active:scale-[0.98] transition-all cursor-pointer"
           >
-            REGISTER / SIGN IN
+            🔐 LOGIN
           </button>
 
           {showInstallHint && (
             <p className="text-[11px] text-gray-400 mt-1">
-              अपने browser के menu (⋮) से "Add to Home Screen" चुनें।
+              अपने browser के menu (⋮) से &quot;Add to Home Screen&quot; चुनें।
             </p>
           )}
         </div>
@@ -112,7 +132,7 @@ export default function LandingPage({ onOpenAuth }: LandingPageProps) {
           About Arena Nepal
         </h2>
         <p className="text-sm text-gray-300 leading-relaxed mb-3">
-          Welcome to Arena Nepal – Nepal's Premier Gaming &amp; Skill-Based Rewards Platform!
+          Welcome to Arena Nepal – Nepal&apos;s Premier Gaming &amp; Skill-Based Rewards Platform!
         </p>
         <p className="text-sm text-gray-400 leading-relaxed mb-4">
           Arena Nepal is designed for gamers who want to experience non-stop entertainment
@@ -232,8 +252,11 @@ export default function LandingPage({ onOpenAuth }: LandingPageProps) {
           <button onClick={handleDownloadClick} className="hover:text-white">
             Download App
           </button>
+          <button onClick={openGetIdWhatsApp} className="hover:text-white">
+            Get ID
+          </button>
           <button onClick={onOpenAuth} className="hover:text-white">
-            Register / Sign In
+            Login
           </button>
           <button onClick={() => scrollTo(aboutRef)} className="hover:text-white">
             About Us
@@ -249,4 +272,3 @@ export default function LandingPage({ onOpenAuth }: LandingPageProps) {
     </main>
   );
 }
-

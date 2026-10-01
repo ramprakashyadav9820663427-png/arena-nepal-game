@@ -16,6 +16,11 @@ const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
 const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
+// 🔒 Tournaments lock switch.
+// true  = every tournament shows "Tournament Closed" and nobody can join.
+// false = tournaments work normally again.
+const TOURNAMENTS_LOCKED = true;
+
 type TournamentType = 'NONE' | 'DAY' | 'WEEK' | 'MEGA';
 type DbTournamentType = 'day' | 'week' | 'mega';
 
@@ -449,6 +454,11 @@ export default function TournamentSection() {
       clearMessage();
       if (type === 'NONE') return;
 
+      if (TOURNAMENTS_LOCKED) {
+        showMessage('Tournament Closed');
+        return;
+      }
+
       const dbType = TYPE_MAP[type] as DbTournamentType;
       const record = pickTournamentRecord(tournaments, dbType);
 
@@ -780,7 +790,8 @@ export default function TournamentSection() {
   ) => {
     const dbType = TYPE_MAP[type] as DbTournamentType;
     const record = pickTournamentRecord(tournaments, dbType);
-    const open = record ? isRecordOpen(record) : false;
+    const open =
+      !TOURNAMENTS_LOCKED && (record ? isRecordOpen(record) : false);
     const fee = record
       ? Number(record.entry_fee ?? FALLBACK_FEES[dbType])
       : FALLBACK_FEES[dbType];
@@ -828,7 +839,10 @@ export default function TournamentSection() {
 
         {!record || !open ? (
           <div className="w-full py-2.5 bg-red-950/80 text-red-400 font-bold text-xs rounded-2xl text-center border border-red-500/30">
-            🔒 {record ? 'Tournament Closed' : 'Not Configured'}
+            🔒{' '}
+            {TOURNAMENTS_LOCKED || record
+              ? 'Tournament Closed'
+              : 'Not Configured'}
           </div>
         ) : (
           <button
