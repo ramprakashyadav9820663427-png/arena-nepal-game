@@ -6,6 +6,7 @@ import RockPaperScissors from '@/components/game/RockPaperScissors';
 import GameSection from '@/components/game/GameSection';
 import TeenPattiBattle from '@/components/game/TeenPattiBattle';
 import OneCardBattle from '@/components/game/OneCardBattle';
+import RocketCrashGame from '@/components/game/RocketCrashGame';
 import CarRacingGame from '@/components/game/CarRacingGame';
 import LudoGotiSprint from '@/components/game/LudoGotiSprint';
 import ArenaSpinnerWinner from '@/components/game/ArenaSpinnerWinner';
@@ -53,6 +54,14 @@ const GAMES_LIST = [
     thumbnail: '/thumbnails/teenpatti.jpg',
     category: 'popular',
     accent: 'yellow'
+  },
+  {
+    id: 'rocket',
+    name: 'Rocket Crash',
+    tag: 'LIVE CRASH',
+    thumbnail: '/thumbnails/rocket.jpg',
+    category: 'popular',
+    accent: 'cyan'
   },
   {
     id: 'rps',
@@ -784,6 +793,10 @@ export default function Home() {
                   />
                 ) : selectedGame === 'onecard' ? (
                   <OneCardBattle
+                    onBackToLobby={() => setSelectedGame(null)}
+                  />
+                ) : selectedGame === 'rocket' ? (
+                  <RocketCrashGame
                     onBackToLobby={() => setSelectedGame(null)}
                   />
                 ) : selectedGame === 'carracing' ? (
