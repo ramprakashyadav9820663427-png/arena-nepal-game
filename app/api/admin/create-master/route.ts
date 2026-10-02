@@ -1,145 +1,191 @@
-import { createClient } from '@supabase/supabase-js';
 import { NextResponse } from 'next/server';
+import { verifyAdminRequest, generateTempPassword } from '@/lib/adminAuth';
+import { supabaseAdmin } from '@/lib/supabaseadmin';
 
-// यह कोड 100% सर्वर-साइड पर ही रन होगा
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
-
-// रैंडम पासवर्ड जनरेटर
-function generateRandomPassword(length = 10): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$';
-  let pass = '';
-  for (let i = 0; i < length; i++) {
-    pass += chars.charAt(Math.floor(Math.random() * chars.length));
+function generateMasterCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let part = '';
+  for (let i = 0; i < 8; i++) {
+    part += chars[Math.floor(Math.random() * chars.length)];
   }
-  return pass;
+  return `MASTER-${part}`;
 }
 
-// मास्टर कोड जनरेटर (उदा. MASTER-582)
-function generateMasterCode(): string {
-  const num = Math.floor(100 + Math.random() * 900);
-  return `MASTER-${num}`;
-}
-
-export async function POST(req: Request) {
-  try {
-    // 1. सर्वर-साइड केवल सुरक्षित Environment Variables पढ़ेगा
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ixaugtdwfxhmqypglder.supabase.co';
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!serviceRoleKey) {
-      console.error('CRITICAL: SUPABASE_SERVICE_ROLE_KEY is missing on server!');
-      return NextResponse.json(
-        { error: 'Server configuration error: Service role key missing.' },
-        { status: 500 }
-      );
-    }
-
-    // 2. कॉलर (Admin) का Authorization टोकन निकालना
-    const authHeader = req.headers.get('authorization') || '';
-    const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-
-    if (!token) {
-      return NextResponse.json(
-        { error: 'Unauthorized: Session token missing.' },
-        { status: 401 }
-      );
-    }
-
-    // 3. सर्वर-साइड Supabase Admin Client (Service Role के साथ)
-    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
+async function findUserIdByEmail(email: string): Promise<string | null> {
+  // Paginate a bit — enough for most projects
+  for (let page = 1; page <= 10; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({
+      page,
+      perPage: 200,
     });
+    if (error || !data?.users?.length) break;
+    const found = data.users.find(
+      (u) => (u.email || '').toLowerCase() === email.toLowerCase()
+    );
+    if (found) return found.id;
+    if (data.users.length < 200) break;
+  }
+  return null;
+}
 
-    // 4. टोकन वेरिफाई करना कि लॉगिन सेशन सही है या नहीं
-    const {
-      data: { user: callerUser },
-      error: tokenError,
-    } = await supabaseAdmin.auth.getUser(token);
+export async function POST(request: Request) {
+  const auth = await verifyAdminRequest(request, 'owner');
 
-    if (tokenError || !callerUser) {
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const body = await request.json().catch(() => null);
+
+  const fullName: string = (body?.full_name || '').trim();
+  const email: string = (body?.email || '').trim().toLowerCase();
+  const phone: string = (body?.phone || '').trim();
+  const givenPassword: string = (body?.password || '').trim();
+
+  if (!fullName) {
+    return NextResponse.json({ error: 'Full name is required.' }, { status: 400 });
+  }
+  if (!email || !email.includes('@')) {
+    return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
+  }
+  if (givenPassword && givenPassword.length < 6) {
+    return NextResponse.json(
+      { error: 'Password must be at least 6 characters.' },
+      { status: 400 }
+    );
+  }
+
+  const password = givenPassword || generateTempPassword();
+  let userId: string | null = null;
+  let createdNew = false;
+
+  // 1) Try create new auth user
+  const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      full_name: fullName,
+      phone: phone || null,
+      account_type: 'master',
+    },
+  });
+
+  if (created?.user) {
+    userId = created.user.id;
+    createdNew = true;
+  } else {
+    const msg = (createError?.message || '').toLowerCase();
+    const already =
+      msg.includes('already') ||
+      msg.includes('registered') ||
+      msg.includes('exists');
+
+    if (!already) {
       return NextResponse.json(
-        { error: 'Invalid or expired session. Please log in again.' },
-        { status: 401 }
-      );
-    }
-
-    // 5. फॉर्म डेटा प्राप्त करना
-    const body = await req.json().catch(() => ({}));
-    const full_name = (body.full_name || '').trim();
-    const email = (body.email || '').trim().toLowerCase();
-    const phone = (body.phone || '').trim();
-    const customPassword = (body.password || '').trim();
-
-    if (!email || !full_name) {
-      return NextResponse.json(
-        { error: 'Full name and email are required.' },
+        { error: createError?.message || 'Could not create master account.' },
         { status: 400 }
       );
     }
 
-    const temp_password = customPassword || generateRandomPassword();
-    const master_code = generateMasterCode();
-
-    // 6. Supabase Auth में नया मास्टर यूज़र बनाना
-    const { data: authResult, error: createAuthError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: temp_password,
-        email_confirm: true, // ईमेल कन्फर्मेशन को बाईपास करेगा
-        user_metadata: {
-          role: 'master',
-          master_code,
-          full_name,
-          phone: phone || null,
-        },
-      });
-
-    if (createAuthError || !authResult?.user) {
+    // 2) Email already exists (e.g. player) → reuse that user
+    userId = await findUserIdByEmail(email);
+    if (!userId) {
       return NextResponse.json(
         {
           error:
-            createAuthError?.message || 'Could not create master account in Auth.',
+            'This email is already registered but user could not be found. Try another email.',
         },
         { status: 400 }
       );
     }
 
-    const createdUserId = authResult.user.id;
-
-    // 7. masters टेबल में मास्टर का डेटा दर्ज करना
-    const { error: insertError } = await supabaseAdmin.from('masters').insert({
-      user_id: createdUserId,
-      master_code,
-      email,
-      full_name,
-      phone: phone || null,
-      red_diamonds: 0,
-      player_count: 0,
-      created_at: new Date().toISOString(),
+    // Set/reset password so Master can login with the password you typed
+    const { error: passErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: fullName,
+        phone: phone || null,
+        account_type: 'master',
+      },
     });
-
-    if (insertError) {
-      // अगर masters टेबल में कॉलम का नाम अलग हो तो सर्वर लॉग में दिखेगा
-      console.warn('Notice: insert into masters table:', insertError.message);
+    if (passErr) {
+      return NextResponse.json(
+        { error: `Could not update password: ${passErr.message}` },
+        { status: 400 }
+      );
     }
+  }
 
-    // 8. AdminPage.tsx के अनुसार रिटर्न करना
-    return NextResponse.json({
-      success: true,
-      email,
-      master_code,
-      temp_password,
-    });
-  } catch (err: any) {
-    console.error('Server error in create-master:', err);
+  // 3) Already a master?
+  const { data: existingMaster } = await supabaseAdmin
+    .from('masters')
+    .select('id, master_code, email')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (existingMaster) {
     return NextResponse.json(
-      { error: err?.message || 'Internal server error.' },
+      {
+        error: `This email is already a Master (${existingMaster.master_code}).`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // 4) Unique MASTER code
+  let masterCode = generateMasterCode();
+  for (let i = 0; i < 5; i++) {
+    const { data: existing } = await supabaseAdmin
+      .from('masters')
+      .select('id')
+      .eq('master_code', masterCode)
+      .maybeSingle();
+    if (!existing) break;
+    masterCode = generateMasterCode();
+  }
+
+  // 5) Insert masters row
+  const { error: masterError } = await supabaseAdmin.from('masters').insert({
+    id: userId,
+    master_code: masterCode,
+    email,
+    full_name: fullName,
+    phone: phone || null,
+    red_diamonds: 0,
+    is_active: true,
+    created_by: auth.userId,
+  });
+
+  if (masterError) {
+    // Only delete auth user if WE just created it
+    if (createdNew) {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+    }
+    return NextResponse.json(
+      { error: `Master profile error: ${masterError.message}` },
       { status: 500 }
     );
   }
+
+  try {
+    await supabaseAdmin.from('admin_audit_log').insert({
+      admin_id: auth.userId,
+      action: 'create_master',
+      target_type: 'masters',
+      target_id: userId,
+      detail: { email, master_code: masterCode, reused_existing_user: !createdNew },
+    });
+  } catch {
+    // ignore
+  }
+
+  return NextResponse.json({
+    success: true,
+    email,
+    master_code: masterCode,
+    temp_password: password,
+    reused_existing_user: !createdNew,
+  });
 }

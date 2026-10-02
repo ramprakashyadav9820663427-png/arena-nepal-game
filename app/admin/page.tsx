@@ -5,11 +5,15 @@ import { createClient } from '@supabase/supabase-js';
 import InstallAppCard from '@/components/InstallAppCard';
 import { initPWA } from '@/lib/pwa';
 
-const supabaseUrl = 'https://ixaugtdwfxhmqypglder.supabase.co';
-const supabaseAnonKey = 'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
+const supabaseUrl =
+  process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://ixaugtdwfxhmqypglder.supabase.co';
+const supabaseAnonKey =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  'sb_publishable_XRLDHfS-bDHlJJBzlGEmqQ_WetQ24cZ';
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type Tab =
+  | 'game_records'
   | 'deposits'
   | 'withdraws'
   | 'players'
@@ -19,6 +23,7 @@ type Tab =
   | 'create_master'
   | 'master_deposit'
   | 'master_home'
+  | 'master_game_records'
   | 'master_transfer'
   | 'master_players'
   | 'master_deposits'
@@ -74,7 +79,26 @@ type TournamentAdminRow = {
   }[];
 };
 
+type GameRecordRow = {
+  id: number | string;
+  round_id?: string;
+  player_uid: string;
+  player_name?: string;
+  master_code?: string;
+  game_id: string;
+  game_name: string;
+  stake_amount: number;
+  payout_amount: number;
+  loss_amount: number;
+  result: string;
+  net_diamonds: number;
+  house_profit?: number;
+  details?: string;
+  created_at: string;
+};
+
 const PERMISSIONS: { key: string; label: string }[] = [
+  { key: 'game_records', label: 'Game Records' },
   { key: 'deposit', label: 'Deposit' },
   { key: 'withdraw', label: 'Withdraw' },
   { key: 'password_reset', label: 'Password Reset' },
@@ -95,7 +119,7 @@ function formatDate(value?: string) {
 }
 
 function randomPassword(len = 10) {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#';
   let out = '';
   for (let i = 0; i < len; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
@@ -119,9 +143,10 @@ export default function AdminPage() {
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const notify = (text: string, type: 'success' | 'error' = 'success') => {
     setToast({ type, text });
-    window.setTimeout(() => setToast(null), 6000);
+    window.setTimeout(() => setToast(null), 5000);
   };
 
+  // Deposits
   const [deposits, setDeposits] = useState<DepositRequest[]>([]);
   const [loadingDeposits, setLoadingDeposits] = useState(false);
   const [busyDepositId, setBusyDepositId] = useState<string | number | null>(null);
@@ -131,21 +156,25 @@ export default function AdminPage() {
   const [manualNote, setManualNote] = useState('');
   const [creditingManual, setCreditingManual] = useState(false);
 
+  // Withdraws
   const [withdraws, setWithdraws] = useState<WithdrawRequest[]>([]);
   const [loadingWithdraws, setLoadingWithdraws] = useState(false);
   const [busyWithdrawId, setBusyWithdrawId] = useState<string | number | null>(null);
   const [rejectReasonDraft, setRejectReasonDraft] = useState<Record<string, string>>({});
 
+  // Players
   const [playerSearchUid, setPlayerSearchUid] = useState('');
   const [playerResult, setPlayerResult] = useState<any>(null);
   const [searchingPlayer, setSearchingPlayer] = useState(false);
   const [playerGameStats, setPlayerGameStats] = useState<any>(null);
 
+  // Password Reset
   const [resetIdentifier, setResetIdentifier] = useState('');
   const [resetNewPassword, setResetNewPassword] = useState('');
   const [resettingPassword, setResettingPassword] = useState(false);
   const [lastResetResult, setLastResetResult] = useState<{ uid: string; password: string } | null>(null);
 
+  // Create Player
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerNickname, setNewPlayerNickname] = useState('');
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
@@ -158,10 +187,12 @@ export default function AdminPage() {
     password: string;
   } | null>(null);
 
+  // Tournaments
   const [tournamentRows, setTournamentRows] = useState<TournamentAdminRow[]>([]);
   const [loadingTournaments, setLoadingTournaments] = useState(false);
   const [expandedTournamentId, setExpandedTournamentId] = useState<string | null>(null);
 
+  // Master Management
   const [newMasterName, setNewMasterName] = useState('');
   const [newMasterEmail, setNewMasterEmail] = useState('');
   const [newMasterPhone, setNewMasterPhone] = useState('');
@@ -179,6 +210,7 @@ export default function AdminPage() {
   const [mastersList, setMastersList] = useState<any[]>([]);
   const [loadingMasters, setLoadingMasters] = useState(false);
 
+  // Master Panel State
   const [masterProfile, setMasterProfile] = useState<{
     master_code: string;
     email: string;
@@ -201,6 +233,13 @@ export default function AdminPage() {
   const [busyMasterWithdrawId, setBusyMasterWithdrawId] = useState<string | number | null>(null);
   const [masterRejectReason, setMasterRejectReason] = useState<Record<string, string>>({});
 
+  // 🌟 GAME RECORDS STATE (सभी गेम्स का रिकॉर्ड)
+  const [gameRecords, setGameRecords] = useState<GameRecordRow[]>([]);
+  const [loadingGameRecords, setLoadingGameRecords] = useState(false);
+  const [gameFilter, setGameFilter] = useState('all');
+  const [searchGameUid, setSearchGameUid] = useState('');
+
+  // Today Stats
   const [todayStats, setTodayStats] = useState<{
     date?: string;
     deposit_count?: number;
@@ -240,6 +279,7 @@ export default function AdminPage() {
       const has = (r: string) => isOwner || roleList.includes(r);
 
       const first: Tab | null =
+        (isOwner && 'game_records') ||
         (has('deposit') && 'deposits') ||
         (has('withdraw') && 'withdraws') ||
         (has('password_reset') && 'password') ||
@@ -353,6 +393,36 @@ export default function AdminPage() {
     return json;
   };
 
+  // 🌟 FETCH GAME RECORDS (ओनर और मास्टर दोनों के लिए)
+  const fetchGameRecords = useCallback(async () => {
+    setLoadingGameRecords(true);
+    try {
+      if (accountType === 'admin') {
+        const { data, error } = await supabase.rpc('owner_get_all_game_records');
+        if (!error && Array.isArray(data)) {
+          setGameRecords(data);
+        } else {
+          // फ़ालबैक सीधे टेबल से अगर RPC न चले
+          const { data: tblData } = await supabase
+            .from('game_records')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(150);
+          setGameRecords((tblData || []) as any);
+        }
+      } else {
+        const { data, error } = await supabase.rpc('master_get_my_game_records');
+        if (!error && Array.isArray(data)) {
+          setGameRecords(data);
+        }
+      }
+    } catch (err: any) {
+      console.warn('Game records fetch note:', err?.message);
+    } finally {
+      setLoadingGameRecords(false);
+    }
+  }, [accountType]);
+
   const fetchTodayStats = useCallback(async () => {
     setLoadingTodayStats(true);
     try {
@@ -360,7 +430,6 @@ export default function AdminPage() {
       if (error) throw error;
       setTodayStats(data as any);
     } catch (err: any) {
-      // silent if not owner
       console.error(err);
     } finally {
       setLoadingTodayStats(false);
@@ -601,6 +670,7 @@ export default function AdminPage() {
     }
   }, []);
 
+  // 🌟 MASTER CREATION (सुरक्षित Next.js API रूट से कनेक्टेड)
   const createMaster = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreatingMaster(true);
@@ -621,7 +691,7 @@ export default function AdminPage() {
       setNewMasterEmail('');
       setNewMasterPhone('');
       setNewMasterPassword('');
-      notify('Master ID created.');
+      notify('Master ID created successfully!');
       await fetchMasters();
     } catch (err: any) {
       notify(err?.message || 'Could not create master.', 'error');
@@ -645,7 +715,7 @@ export default function AdminPage() {
         p_note: masterCreditNote.trim() || null,
       });
       if (error) throw error;
-      notify(`Credited ${amount} to ${(data as any)?.master_code || masterCreditCode}.`);
+      notify(`Credited ${amount} 🔴 to ${(data as any)?.master_code || masterCreditCode}.`);
       setMasterCreditCode('');
       setMasterCreditAmount('');
       setMasterCreditNote('');
@@ -790,10 +860,27 @@ export default function AdminPage() {
     }
   };
 
+  // Filtered game records
+  const filteredRecords = gameRecords.filter((r) => {
+    const matchesGame = gameFilter === 'all' || r.game_id === gameFilter;
+    const matchesUid =
+      !searchGameUid.trim() ||
+      r.player_uid.toLowerCase().includes(searchGameUid.toLowerCase()) ||
+      (r.player_name || '').toLowerCase().includes(searchGameUid.toLowerCase()) ||
+      (r.master_code || '').toLowerCase().includes(searchGameUid.toLowerCase());
+    return matchesGame && matchesUid;
+  });
+
+  const totalGameStake = filteredRecords.reduce((acc, r) => acc + Number(r.stake_amount || 0), 0);
+  const totalGameWon = filteredRecords.reduce((acc, r) => acc + Number(r.payout_amount || 0), 0);
+  const totalGameLost = filteredRecords.reduce((acc, r) => acc + Number(r.loss_amount || 0), 0);
+  const totalHouseProfit = totalGameStake - totalGameWon;
+
   useEffect(() => {
     if (!isLoggedIn || !activeTab) return;
     if (accountType === 'admin') {
       if (roles.includes('owner')) void fetchTodayStats();
+      if (activeTab === 'game_records') void fetchGameRecords();
       if (activeTab === 'deposits') void fetchDeposits();
       if (activeTab === 'withdraws') void fetchWithdraws();
       if (activeTab === 'tournaments') void fetchTournamentsAdmin();
@@ -801,6 +888,7 @@ export default function AdminPage() {
     }
     if (accountType === 'master') {
       if (activeTab === 'master_home') void refreshMasterProfile();
+      if (activeTab === 'master_game_records') void fetchGameRecords();
       if (activeTab === 'master_players') void fetchMasterPlayers();
       if (activeTab === 'master_deposits') void fetchMasterDeposits();
       if (activeTab === 'master_withdraws') void fetchMasterWithdraws();
@@ -811,6 +899,7 @@ export default function AdminPage() {
     accountType,
     roles,
     fetchTodayStats,
+    fetchGameRecords,
     fetchDeposits,
     fetchWithdraws,
     fetchTournamentsAdmin,
@@ -823,33 +912,43 @@ export default function AdminPage() {
 
   if (checkingSession) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0B0F19]">
+      <div className="flex min-h-screen items-center justify-center bg-[#07090e]">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-yellow-400 border-t-transparent" />
       </div>
     );
   }
 
+  // 3D LOGIN SCREEN
   if (!isLoggedIn) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#0B0F19] p-4 text-white">
-        <div className="w-full max-w-sm rounded-2xl border border-purple-500/30 bg-gray-900 p-6 shadow-2xl">
-          <h1 className="mb-1 bg-gradient-to-r from-pink-400 to-cyan-400 bg-clip-text text-center text-lg font-black text-transparent">
-            {loginMode === 'master' ? '🎫 MASTER ID LOGIN' : '🛡️ ARENA NEPAL ADMIN'}
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#07090e] p-4 text-white">
+        <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-gradient-to-b from-[#161f30] to-[#0b0f19] p-7 shadow-[0_20px_50px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.2)]">
+          <div className="mb-2 flex justify-center">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-pink-500 to-yellow-400 p-[2px] shadow-lg">
+              <div className="w-full h-full bg-[#0b0f19] rounded-[14px] flex items-center justify-center text-xl">
+                🛡️
+              </div>
+            </div>
+          </div>
+          <h1 className="mb-1 bg-gradient-to-r from-pink-400 via-purple-300 to-cyan-400 bg-clip-text text-center text-xl font-black text-transparent">
+            {loginMode === 'master' ? '🎫 MASTER ID LOGIN' : '🛡️ ARENA NEPAL 3D'}
           </h1>
-          <p className="mb-4 text-center text-[11px] text-gray-400">
-            {loginMode === 'master'
-              ? 'Master accounts only.'
-              : 'Staff login only.'}
+          <p className="mb-5 text-center text-xs text-gray-400">
+            {loginMode === 'master' ? 'Master Distributor access only.' : 'Owner & Staff access only.'}
           </p>
-          <div className="mb-4 grid grid-cols-2 gap-2 rounded-xl bg-black/40 p-1">
+
+          {/* 3D Mode Toggle */}
+          <div className="mb-5 grid grid-cols-2 gap-2 rounded-2xl bg-black/60 p-1.5 shadow-inner border border-white/5">
             <button
               type="button"
               onClick={() => {
                 setLoginMode('admin');
                 setLoginError('');
               }}
-              className={`rounded-lg py-2 text-xs font-black ${
-                loginMode === 'admin' ? 'bg-purple-600 text-white' : 'text-gray-400'
+              className={`rounded-xl py-2.5 text-xs font-black transition-all ${
+                loginMode === 'admin'
+                  ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-[0_3px_0_#831843]'
+                  : 'text-gray-400 hover:text-white'
               }`}
             >
               Admin Login
@@ -860,21 +959,24 @@ export default function AdminPage() {
                 setLoginMode('master');
                 setLoginError('');
               }}
-              className={`rounded-lg py-2 text-xs font-black ${
-                loginMode === 'master' ? 'bg-yellow-500 text-black' : 'text-gray-400'
+              className={`rounded-xl py-2.5 text-xs font-black transition-all ${
+                loginMode === 'master'
+                  ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-black shadow-[0_3px_0_#b45309]'
+                  : 'text-gray-400 hover:text-white'
               }`}
             >
               Master Login
             </button>
           </div>
-          <form onSubmit={handleLogin} className="flex flex-col gap-3">
+
+          <form onSubmit={handleLogin} className="flex flex-col gap-3.5">
             <input
               type="email"
-              placeholder="Email"
+              placeholder="Email address"
               value={loginEmail}
               onChange={(e) => setLoginEmail(e.target.value)}
               required
-              className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none focus:border-purple-500"
+              className="w-full rounded-2xl border border-gray-800 bg-black/70 p-3.5 text-xs text-white outline-none focus:border-cyan-500 shadow-inner"
             />
             <input
               type="password"
@@ -882,22 +984,22 @@ export default function AdminPage() {
               value={loginPassword}
               onChange={(e) => setLoginPassword(e.target.value)}
               required
-              className="w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none focus:border-purple-500"
+              className="w-full rounded-2xl border border-gray-800 bg-black/70 p-3.5 text-xs text-white outline-none focus:border-cyan-500 shadow-inner"
             />
             {loginError && (
-              <p className="rounded-lg border border-red-500/40 bg-red-950/60 p-2 text-[11px] text-red-300">
+              <p className="rounded-xl border border-red-500/40 bg-red-950/60 p-2.5 text-xs text-red-300">
                 {loginError}
               </p>
             )}
             <button
               type="submit"
               disabled={loginBusy}
-              className="rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 py-3 text-xs font-bold text-white disabled:opacity-50"
+              className="mt-2 rounded-2xl bg-gradient-to-r from-pink-500 via-purple-600 to-cyan-500 py-3.5 text-xs font-black text-white shadow-[0_4px_0_#701a75,0_10px_20px_rgba(236,72,153,0.3)] active:translate-y-1 active:shadow-none disabled:opacity-50 transition-all"
             >
-              {loginBusy ? 'Signing in...' : 'Login'}
+              {loginBusy ? 'Authenticating...' : 'Sign In ➔'}
             </button>
           </form>
-          <div className="mt-4 flex justify-center">
+          <div className="mt-5 flex justify-center">
             <InstallAppCard variant="button" />
           </div>
         </div>
@@ -906,50 +1008,55 @@ export default function AdminPage() {
   }
 
   const inputCls =
-    'w-full rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none';
+    'w-full rounded-xl border border-gray-800 bg-black/80 p-3 text-xs text-white outline-none focus:border-cyan-500 shadow-inner';
 
-  // MASTER PANEL
+  // ----------------------------------------------------
+  // MASTER PANEL (3D UI)
+  // ----------------------------------------------------
   if (accountType === 'master') {
     return (
-      <div className="min-h-screen bg-[#0B0F19] p-4 text-white">
+      <div className="min-h-screen bg-[#07090e] p-4 text-white">
         {toast && (
           <div
-            className={`fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-xl border px-4 py-3 text-sm ${
+            className={`fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-bold shadow-2xl backdrop-blur-md ${
               toast.type === 'success'
-                ? 'border-green-500/40 bg-green-950 text-green-300'
-                : 'border-red-500/40 bg-red-950 text-red-300'
+                ? 'border-green-500/50 bg-green-950/90 text-green-300'
+                : 'border-red-500/50 bg-red-950/90 text-red-300'
             }`}
           >
             {toast.text}
           </div>
         )}
         <div className="mx-auto flex w-full max-w-5xl flex-col">
-          <div className="mb-6 flex flex-col justify-between gap-3 rounded-2xl border border-yellow-500/30 bg-gray-900 p-4 sm:flex-row sm:items-center">
+          {/* Top Master 3D Header */}
+          <div className="mb-6 flex flex-col justify-between gap-3 rounded-3xl border border-yellow-500/30 bg-gradient-to-b from-[#1a2333] to-[#0c121d] p-5 shadow-[0_15px_30px_rgba(0,0,0,0.5),inset_0_1px_1px_rgba(255,255,255,0.15)] sm:flex-row sm:items-center">
             <div>
-              <h1 className="bg-gradient-to-r from-yellow-300 to-orange-400 bg-clip-text text-lg font-black text-transparent">
-                🎫 MASTER PANEL
+              <h1 className="bg-gradient-to-r from-yellow-300 via-amber-400 to-orange-500 bg-clip-text text-xl font-black text-transparent">
+                🎫 MASTER DISTRIBUTOR PANEL
               </h1>
-              <p className="mt-1 text-[11px] text-gray-400">
-                {masterProfile?.full_name || adminEmail} · {masterProfile?.master_code || '—'}
+              <p className="mt-1 text-xs text-gray-400">
+                {masterProfile?.full_name || adminEmail} · <span className="font-mono text-yellow-300 font-bold">{masterProfile?.master_code || '—'}</span>
               </p>
             </div>
             <button
               onClick={handleLogout}
-              className="rounded-xl border border-red-500/40 bg-red-600/20 px-4 py-2 text-xs font-bold text-red-300"
+              className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-2 text-xs font-black text-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-1 active:shadow-none transition-all"
             >
               Logout
             </button>
           </div>
-          <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4">
+
+          {/* 3D Master Navigation Tabs */}
+          <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             {(
               [
                 ['master_home', 'Home'],
-                ['master_transfer', 'Transfer'],
+                ['master_game_records', '🎮 Game Records'],
+                ['master_transfer', 'Transfer 🔴'],
                 ['master_create_player', 'Create Player'],
                 ['master_players', 'My Players'],
                 ['master_deposits', 'Deposits'],
                 ['master_withdraws', 'Withdraws'],
-                ['master_password', 'Password'],
               ] as [Tab, string][]
             ).map(([id, label]) => (
               <TabButton key={id} active={activeTab === id} onClick={() => setActiveTab(id)}>
@@ -959,38 +1066,114 @@ export default function AdminPage() {
           </div>
 
           {activeTab === 'master_home' && (
-            <section className="rounded-2xl border border-yellow-500/30 bg-gray-900 p-5">
-              <h2 className="mb-3 text-sm font-black text-yellow-300">RED DIAMOND BALANCE</h2>
-              <p className="text-4xl font-black text-red-300">🔴 {masterProfile?.red_diamonds ?? 0}</p>
+            <section className="rounded-3xl border border-yellow-500/30 bg-gradient-to-b from-[#182030] to-[#0b0f19] p-6 shadow-2xl">
+              <h2 className="mb-2 text-xs font-black text-yellow-300 tracking-wider">RED DIAMOND BALANCE</h2>
+              <p className="text-4xl font-black text-red-400">🔴 {masterProfile?.red_diamonds?.toLocaleString() ?? 0}</p>
               <p className="mt-3 text-xs text-gray-400">
-                Players: <b className="text-white">{masterProfile?.player_count ?? 0}</b>
+                Total Players: <b className="text-white font-bold">{masterProfile?.player_count ?? 0}</b>
               </p>
               <button
                 onClick={() => void refreshMasterProfile()}
-                className="mt-4 rounded-lg border border-gray-700 bg-black px-3 py-2 text-xs font-bold text-gray-200"
+                className="mt-4 rounded-xl border border-gray-700 bg-black/60 px-4 py-2 text-xs font-bold text-gray-200 shadow-md active:translate-y-1"
               >
-                Refresh
+                Refresh Balance
               </button>
             </section>
           )}
 
+          {/* 🌟 MASTER GAME RECORDS TAB */}
+          {activeTab === 'master_game_records' && (
+            <section className="flex flex-col gap-4">
+              <div className="flex justify-between items-center">
+                <h2 className="text-sm font-black text-cyan-300">MY PLAYERS GAME RECORDS</h2>
+                <button
+                  onClick={() => void fetchGameRecords()}
+                  className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold"
+                >
+                  {loadingGameRecords ? 'Loading…' : 'Refresh'}
+                </button>
+              </div>
+
+              {/* 3D KPI Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="rounded-2xl border border-gray-800 bg-black/40 p-3 shadow-lg">
+                  <p className="text-[10px] text-gray-400 font-bold">Total Stake (खेला)</p>
+                  <p className="text-base font-black text-white mt-1">{totalGameStake.toLocaleString()} 🔴</p>
+                </div>
+                <div className="rounded-2xl border border-emerald-500/30 bg-black/40 p-3 shadow-lg">
+                  <p className="text-[10px] text-emerald-400 font-bold">Total Won (जीता)</p>
+                  <p className="text-base font-black text-emerald-400 mt-1">{totalGameWon.toLocaleString()} 🔴</p>
+                </div>
+                <div className="rounded-2xl border border-red-500/30 bg-black/40 p-3 shadow-lg">
+                  <p className="text-[10px] text-red-400 font-bold">Total Lost (हारा)</p>
+                  <p className="text-base font-black text-red-400 mt-1">{totalGameLost.toLocaleString()} 🔴</p>
+                </div>
+                <div className="rounded-2xl border border-yellow-500/30 bg-black/40 p-3 shadow-lg">
+                  <p className="text-[10px] text-yellow-300 font-bold">House Margin</p>
+                  <p className="text-base font-black text-yellow-300 mt-1">{totalHouseProfit.toLocaleString()} 🔴</p>
+                </div>
+              </div>
+
+              {/* Game Records List */}
+              <div className="flex flex-col gap-2.5">
+                {filteredRecords.length === 0 ? (
+                  <p className="text-center text-xs text-gray-500 py-8">कोई गेम रिकॉर्ड नहीं मिला।</p>
+                ) : (
+                  filteredRecords.map((r) => (
+                    <article
+                      key={r.id}
+                      className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md flex justify-between items-center"
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-sm">{r.game_name}</span>
+                          <span className="font-mono text-cyan-400 text-[11px]">{r.player_uid}</span>
+                        </div>
+                        <p className="mt-1 text-gray-400">
+                          Stake: <b className="text-white">{r.stake_amount} 🔴</b> · Won:{' '}
+                          <b className="text-emerald-400">{r.payout_amount} 🔴</b>
+                        </p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">{formatDate(r.created_at)}</p>
+                      </div>
+                      <div className="text-right">
+                        <span
+                          className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black ${
+                            r.result === 'won'
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                          }`}
+                        >
+                          {r.result === 'won' ? 'WON' : 'LOST'}
+                        </span>
+                        <div className="mt-1 font-bold text-xs text-yellow-300">
+                          Net: {r.net_diamonds > 0 ? '+' : ''}
+                          {r.net_diamonds} 🔴
+                        </div>
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
+
           {activeTab === 'master_transfer' && (
-            <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              <h2 className="mb-4 text-sm font-black text-cyan-300">TRANSFER RED DIAMONDS</h2>
-              <p className="mb-3 text-xs text-red-300">Available: 🔴 {masterProfile?.red_diamonds ?? 0}</p>
-              <form onSubmit={masterTransfer} className="flex flex-col gap-3">
+            <section className="rounded-3xl border border-gray-800 bg-[#0e1422] p-6 shadow-2xl">
+              <h2 className="mb-3 text-sm font-black text-cyan-300">TRANSFER RED DIAMONDS TO PLAYER</h2>
+              <p className="mb-4 text-xs text-red-300">Available: 🔴 {masterProfile?.red_diamonds?.toLocaleString() ?? 0}</p>
+              <form onSubmit={masterTransfer} className="flex flex-col gap-3.5">
                 <input className={inputCls} placeholder="Player UID" value={masterTransferUid} onChange={(e) => setMasterTransferUid(e.target.value)} required />
-                <input className={inputCls} type="number" min="1" placeholder="Amount" value={masterTransferAmount} onChange={(e) => setMasterTransferAmount(e.target.value)} required />
+                <input className={inputCls} type="number" min="1" placeholder="Amount (🔴)" value={masterTransferAmount} onChange={(e) => setMasterTransferAmount(e.target.value)} required />
                 <input className={inputCls} placeholder="Note (optional)" value={masterTransferNote} onChange={(e) => setMasterTransferNote(e.target.value)} />
-                <button type="submit" disabled={masterTransferring} className="rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3 text-xs font-black text-black disabled:opacity-50">
-                  {masterTransferring ? 'Sending…' : 'Transfer'}
+                <button type="submit" disabled={masterTransferring} className="rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3.5 text-xs font-black text-black shadow-[0_4px_0_#b45309] active:translate-y-1 active:shadow-none disabled:opacity-50">
+                  {masterTransferring ? 'Sending…' : 'Transfer Diamonds'}
                 </button>
               </form>
             </section>
           )}
 
           {activeTab === 'master_create_player' && (
-            <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
+            <section className="rounded-3xl border border-gray-800 bg-[#0e1422] p-6 shadow-2xl">
               <h2 className="mb-4 text-sm font-black text-cyan-300">CREATE PLAYER</h2>
               <form onSubmit={createPlayer} className="flex flex-col gap-3">
                 <input className={inputCls} placeholder="Full name" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} />
@@ -1001,16 +1184,16 @@ export default function AdminPage() {
                   <button type="button" onClick={() => setNewPlayerPassword(randomPassword())} className="rounded-xl border border-gray-700 bg-black px-3 text-[11px] font-bold text-gray-200">Generate</button>
                 </div>
                 <input className={inputCls} placeholder="Phone" value={newPlayerPhone} onChange={(e) => setNewPlayerPhone(e.target.value)} />
-                <button type="submit" disabled={creatingPlayer} className="rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 py-3 text-xs font-black text-white disabled:opacity-50">
+                <button type="submit" disabled={creatingPlayer} className="rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 py-3.5 text-xs font-black text-white shadow-[0_4px_0_#701a75] active:translate-y-1 active:shadow-none disabled:opacity-50">
                   {creatingPlayer ? 'Creating…' : 'Create Player'}
                 </button>
               </form>
               {lastCreatedPlayer && (
-                <div className="mt-4 rounded-xl border border-green-500/40 bg-green-950/40 p-4 text-xs">
-                  <p className="font-bold text-green-300">Send to player:</p>
-                  <p className="mt-2">Email: <b className="select-all text-white">{lastCreatedPlayer.email}</b></p>
+                <div className="mt-4 rounded-2xl border border-green-500/40 bg-green-950/40 p-4 text-xs font-mono">
+                  <p className="font-bold text-green-300">Player Created Credentials:</p>
+                  <p className="mt-1">Email: <b className="select-all text-white">{lastCreatedPlayer.email}</b></p>
                   <p>UID: <b className="select-all text-yellow-300">{lastCreatedPlayer.player_uid}</b></p>
-                  <p className="mt-1 select-all text-lg font-black text-white">{lastCreatedPlayer.password}</p>
+                  <p className="mt-1 text-base font-black text-white">{lastCreatedPlayer.password}</p>
                 </div>
               )}
             </section>
@@ -1020,13 +1203,13 @@ export default function AdminPage() {
             <section className="flex flex-col gap-3">
               <div className="flex justify-between">
                 <h2 className="text-sm font-black text-cyan-300">MY PLAYERS</h2>
-                <button onClick={() => void fetchMasterPlayers()} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold">{loadingMasterPlayers ? '…' : 'Refresh'}</button>
+                <button onClick={() => void fetchMasterPlayers()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingMasterPlayers ? '…' : 'Refresh'}</button>
               </div>
               {masterPlayers.map((p) => (
-                <article key={p.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-xs">
-                  <p className="font-black text-cyan-300">{p.nickname || p.full_name} · {p.uid}</p>
-                  <p className="mt-2 text-gray-400">🔴 {p.red_diamonds} · ⚪ {p.white_diamonds} · 💵 {p.winning_cash}</p>
-                  <p className="text-gray-500">Dep: {p.deposit_count} · WD: {p.withdraw_count}</p>
+                <article key={p.id} className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md">
+                  <p className="font-black text-cyan-300 text-sm">{p.nickname || p.full_name} · <span className="font-mono text-yellow-300">{p.uid}</span></p>
+                  <p className="mt-2 text-gray-300">🔴 {p.red_diamonds} · ⚪ {p.white_diamonds} · 💵 {p.winning_cash}</p>
+                  <p className="text-gray-500 text-[11px] mt-1">Dep: {p.deposit_count} · WD: {p.withdraw_count}</p>
                 </article>
               ))}
             </section>
@@ -1036,16 +1219,16 @@ export default function AdminPage() {
             <section className="flex flex-col gap-3">
               <div className="flex justify-between">
                 <h2 className="text-sm font-black text-cyan-300">DEPOSITS</h2>
-                <button onClick={() => void fetchMasterDeposits()} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold">{loadingMasterDeposits ? '…' : 'Refresh'}</button>
+                <button onClick={() => void fetchMasterDeposits()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingMasterDeposits ? '…' : 'Refresh'}</button>
               </div>
               {masterDeposits.map((req) => (
-                <article key={req.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-xs">
+                <article key={req.id} className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md">
                   <p className="font-black text-cyan-300">{req.user_uid} · {req.status}</p>
                   <p className="mt-1">🔴 {req.package_diamonds} · NPR {req.amount}</p>
                   {(!req.status || req.status === 'Pending') && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <button onClick={() => void masterApproveDeposit(req.id)} className="rounded-xl bg-green-600 py-2 font-black text-white">Approve</button>
-                      <button onClick={() => void masterRejectDeposit(req.id)} className="rounded-xl border border-red-500/40 py-2 font-black text-red-300">Reject</button>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button onClick={() => void masterApproveDeposit(req.id)} className="rounded-xl bg-green-600 py-2.5 font-black text-white shadow-[0_3px_0_#14532d] active:translate-y-1">Approve</button>
+                      <button onClick={() => void masterRejectDeposit(req.id)} className="rounded-xl border border-red-500/40 bg-red-950/40 py-2.5 font-black text-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-1">Reject</button>
                     </div>
                   )}
                 </article>
@@ -1057,36 +1240,20 @@ export default function AdminPage() {
             <section className="flex flex-col gap-3">
               <div className="flex justify-between">
                 <h2 className="text-sm font-black text-cyan-300">WITHDRAWS</h2>
-                <button onClick={() => void fetchMasterWithdraws()} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold">{loadingMasterWithdraws ? '…' : 'Refresh'}</button>
+                <button onClick={() => void fetchMasterWithdraws()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingMasterWithdraws ? '…' : 'Refresh'}</button>
               </div>
               {masterWithdraws.map((req) => (
-                <article key={req.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-xs">
+                <article key={req.id} className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md">
                   <p className="font-black text-cyan-300">{req.user_uid} · {req.status}</p>
                   <p className="mt-1">NPR {req.amount} · {req.method}</p>
                   {req.status === 'Processing' && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <button onClick={() => void masterApproveWithdraw(req.id)} className="rounded-xl bg-green-600 py-2 font-black text-white">Paid</button>
-                      <button onClick={() => void masterRejectWithdraw(req.id)} className="rounded-xl border border-red-500/40 py-2 font-black text-red-300">Reject</button>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button onClick={() => void masterApproveWithdraw(req.id)} className="rounded-xl bg-green-600 py-2.5 font-black text-white shadow-[0_3px_0_#14532d] active:translate-y-1">Paid</button>
+                      <button onClick={() => void masterRejectWithdraw(req.id)} className="rounded-xl border border-red-500/40 bg-red-950/40 py-2.5 font-black text-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-1">Reject</button>
                     </div>
                   )}
                 </article>
               ))}
-            </section>
-          )}
-
-          {activeTab === 'master_password' && (
-            <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              <h2 className="mb-4 text-sm font-black text-cyan-300">RESET PASSWORD</h2>
-              <form onSubmit={resetPassword} className="flex flex-col gap-3">
-                <input className={inputCls} placeholder="UID or Gmail" value={resetIdentifier} onChange={(e) => setResetIdentifier(e.target.value)} required />
-                <input className={inputCls} placeholder="New password (optional)" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} />
-                <button type="submit" disabled={resettingPassword} className="rounded-xl bg-cyan-500 py-3 text-xs font-black text-black disabled:opacity-50">
-                  {resettingPassword ? '…' : 'Reset'}
-                </button>
-              </form>
-              {lastResetResult && (
-                <p className="mt-4 select-all text-lg font-black text-white">{lastResetResult.password}</p>
-              )}
             </section>
           )}
         </div>
@@ -1094,15 +1261,17 @@ export default function AdminPage() {
     );
   }
 
-  // ADMIN PANEL
+  // ----------------------------------------------------
+  // ADMIN PANEL (3D UI)
+  // ----------------------------------------------------
   return (
-    <div className="min-h-screen bg-[#0B0F19] p-4 text-white">
+    <div className="min-h-screen bg-[#07090e] p-4 text-white">
       {toast && (
         <div
-          className={`fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-xl border px-4 py-3 text-sm ${
+          className={`fixed left-1/2 top-4 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-2xl border px-4 py-3 text-sm font-bold shadow-2xl backdrop-blur-md ${
             toast.type === 'success'
-              ? 'border-green-500/40 bg-green-950 text-green-300'
-              : 'border-red-500/40 bg-red-950 text-red-300'
+              ? 'border-green-500/50 bg-green-950/90 text-green-300'
+              : 'border-red-500/50 bg-red-950/90 text-red-300'
           }`}
         >
           {toast.text}
@@ -1110,18 +1279,22 @@ export default function AdminPage() {
       )}
 
       <div className="mx-auto flex w-full max-w-5xl flex-col">
-        <div className="mb-6 flex flex-col justify-between gap-3 rounded-2xl border border-purple-500/30 bg-gray-900 p-4 sm:flex-row sm:items-center">
+        {/* Top 3D Admin Header */}
+        <div className="mb-6 flex flex-col justify-between gap-3 rounded-3xl border border-purple-500/30 bg-gradient-to-b from-[#182033] to-[#0c121e] p-5 shadow-[0_15px_35px_rgba(0,0,0,0.6),inset_0_1px_1px_rgba(255,255,255,0.2)] sm:flex-row sm:items-center">
           <div>
-            <h1 className="bg-gradient-to-r from-pink-400 to-cyan-400 bg-clip-text text-lg font-black text-transparent">
-              🛡️ ARENA NEPAL ADMIN
+            <h1 className="bg-gradient-to-r from-pink-400 via-purple-300 to-cyan-400 bg-clip-text text-xl font-black text-transparent">
+              🛡️ ARENA NEPAL 3D ADMIN
             </h1>
-            <p className="mt-1 text-[11px] text-gray-400">
-              {adminEmail} · {roles.map((r) => ROLE_LABELS[r] || r).join(', ')}
+            <p className="mt-1 text-xs text-gray-400">
+              {adminEmail} · <span className="text-yellow-300">{roles.map((r) => ROLE_LABELS[r] || r).join(', ')}</span>
             </p>
           </div>
           <div className="flex items-center gap-2">
             <InstallAppCard variant="button" />
-            <button onClick={handleLogout} className="rounded-xl border border-red-500/40 bg-red-600/20 px-4 py-2 text-xs font-bold text-red-300">
+            <button
+              onClick={handleLogout}
+              className="rounded-xl border border-red-500/40 bg-red-950/40 px-4 py-2 text-xs font-black text-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-1 active:shadow-none transition-all"
+            >
               Logout
             </button>
           </div>
@@ -1129,43 +1302,49 @@ export default function AdminPage() {
 
         {/* TODAY STATS — owner only */}
         {roles.includes('owner') && (
-          <section className="mb-6 rounded-2xl border border-yellow-500/30 bg-gray-900 p-4">
+          <section className="mb-6 rounded-3xl border border-yellow-500/30 bg-gradient-to-b from-[#1c1810] to-[#0d0a06] p-5 shadow-2xl">
             <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-black text-yellow-300">
-                TODAY ({todayStats?.date || '—'}) · Nepal
+              <h2 className="text-sm font-black text-yellow-300 tracking-wider">
+                TODAY COLLECTION ({todayStats?.date || '—'}) · NEPAL
               </h2>
               <button
                 onClick={() => void fetchTodayStats()}
-                className="rounded-lg border border-gray-700 bg-black px-3 py-1.5 text-[11px] font-bold text-gray-200"
+                className="rounded-xl border border-gray-700 bg-black/60 px-3 py-1.5 text-[11px] font-bold text-gray-200 active:translate-y-1"
               >
                 {loadingTodayStats ? '…' : 'Refresh'}
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-green-500/20 bg-black/40 p-3">
-                <p className="text-[10px] text-gray-500">Deposits Approved</p>
+              <div className="rounded-2xl border border-green-500/20 bg-black/40 p-3.5 shadow-md">
+                <p className="text-[10px] text-gray-400 font-bold">Deposits Approved</p>
                 <p className="mt-1 text-lg font-black text-green-300">{todayStats?.deposit_count ?? '—'}</p>
-                <p className="text-[11px] text-gray-400">NPR {todayStats?.deposit_amount_npr ?? 0}</p>
-                <p className="text-[11px] text-red-300">🔴 {todayStats?.deposit_diamonds ?? 0}</p>
+                <p className="text-xs text-gray-300">NPR {todayStats?.deposit_amount_npr ?? 0}</p>
+                <p className="text-xs text-red-400 font-bold">🔴 {todayStats?.deposit_diamonds ?? 0}</p>
               </div>
-              <div className="rounded-xl border border-yellow-500/20 bg-black/40 p-3">
-                <p className="text-[10px] text-gray-500">Deposit Pending</p>
+              <div className="rounded-2xl border border-yellow-500/20 bg-black/40 p-3.5 shadow-md">
+                <p className="text-[10px] text-gray-400 font-bold">Deposit Pending</p>
                 <p className="mt-1 text-lg font-black text-yellow-300">{todayStats?.deposit_pending_count ?? '—'}</p>
               </div>
-              <div className="rounded-xl border border-pink-500/20 bg-black/40 p-3">
-                <p className="text-[10px] text-gray-500">Withdraws Paid</p>
+              <div className="rounded-2xl border border-pink-500/20 bg-black/40 p-3.5 shadow-md">
+                <p className="text-[10px] text-gray-400 font-bold">Withdraws Paid</p>
                 <p className="mt-1 text-lg font-black text-pink-300">{todayStats?.withdraw_count ?? '—'}</p>
-                <p className="text-[11px] text-gray-400">NPR {todayStats?.withdraw_amount_npr ?? 0}</p>
+                <p className="text-xs text-gray-300">NPR {todayStats?.withdraw_amount_npr ?? 0}</p>
               </div>
-              <div className="rounded-xl border border-orange-500/20 bg-black/40 p-3">
-                <p className="text-[10px] text-gray-500">Withdraw Processing</p>
+              <div className="rounded-2xl border border-orange-500/20 bg-black/40 p-3.5 shadow-md">
+                <p className="text-[10px] text-gray-400 font-bold">Withdraw Processing</p>
                 <p className="mt-1 text-lg font-black text-orange-300">{todayStats?.withdraw_processing_count ?? '—'}</p>
               </div>
             </div>
           </section>
         )}
 
-        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
+        {/* 3D Navigation Bar */}
+        <div className="mb-6 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-9">
+          {roles.includes('owner') && (
+            <TabButton active={activeTab === 'game_records'} onClick={() => setActiveTab('game_records')}>
+              🎮 Game Records
+            </TabButton>
+          )}
           {canSee('deposit') && <TabButton active={activeTab === 'deposits'} onClick={() => setActiveTab('deposits')}>Deposit</TabButton>}
           {canSee('withdraw') && <TabButton active={activeTab === 'withdraws'} onClick={() => setActiveTab('withdraws')}>Withdraw</TabButton>}
           {canSee('password_reset') && <TabButton active={activeTab === 'password'} onClick={() => setActiveTab('password')}>Password</TabButton>}
@@ -1176,32 +1355,143 @@ export default function AdminPage() {
           {roles.includes('owner') && <TabButton active={activeTab === 'master_deposit'} onClick={() => setActiveTab('master_deposit')}>Master Deposit</TabButton>}
         </div>
 
+        {/* 🌟 1. GAME RECORDS TAB (सभी गेम्स का जीत / हार और टर्नओवर) */}
+        {activeTab === 'game_records' && roles.includes('owner') && (
+          <section className="flex flex-col gap-4">
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+              <div>
+                <h2 className="text-base font-black text-cyan-300">🎮 ALL GAMES WIN/LOSS RECORDS</h2>
+                <p className="text-xs text-gray-400">खिलाड़ी कौन सा गेम खेला, कितना दांव लगाया, कितना जीता और कितना हारा।</p>
+              </div>
+              <button
+                onClick={() => void fetchGameRecords()}
+                className="rounded-xl border border-gray-700 bg-gray-900 px-4 py-2 text-xs font-bold active:translate-y-1 self-start sm:self-auto"
+              >
+                {loadingGameRecords ? 'Refreshing…' : 'Refresh Records'}
+              </button>
+            </div>
+
+            {/* 4 Big 3D Metric Cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 shadow-xl">
+                <p className="text-[11px] text-gray-400 font-bold">Total Stake (खेला गया)</p>
+                <p className="text-xl font-black text-white mt-1">{totalGameStake.toLocaleString()} 🔴</p>
+              </div>
+              <div className="rounded-2xl border border-emerald-500/30 bg-[#0e1422] p-4 shadow-xl">
+                <p className="text-[11px] text-emerald-400 font-bold">Total Won (जीता)</p>
+                <p className="text-xl font-black text-emerald-400 mt-1">{totalGameWon.toLocaleString()} 🔴</p>
+              </div>
+              <div className="rounded-2xl border border-red-500/30 bg-[#0e1422] p-4 shadow-xl">
+                <p className="text-[11px] text-red-400 font-bold">Total Lost (हारा)</p>
+                <p className="text-xl font-black text-red-400 mt-1">{totalGameLost.toLocaleString()} 🔴</p>
+              </div>
+              <div className="rounded-2xl border border-yellow-500/30 bg-gradient-to-br from-[#1a160d] to-[#0c121e] p-4 shadow-xl">
+                <p className="text-[11px] text-yellow-300 font-bold">House Net Profit</p>
+                <p className={`text-xl font-black mt-1 ${totalHouseProfit >= 0 ? 'text-yellow-300' : 'text-rose-400'}`}>
+                  {totalHouseProfit >= 0 ? '+' : ''}{totalHouseProfit.toLocaleString()} 🔴
+                </p>
+              </div>
+            </div>
+
+            {/* Filter and Search */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <input
+                className={inputCls}
+                placeholder="Search by Player UID or Master Code..."
+                value={searchGameUid}
+                onChange={(e) => setSearchGameUid(e.target.value)}
+              />
+              <select
+                className={inputCls}
+                value={gameFilter}
+                onChange={(e) => setGameFilter(e.target.value)}
+              >
+                <option value="all">All Games (सभी गेम्स)</option>
+                <option value="aviator">Aviator Crash</option>
+                <option value="neon_tower">Neon Tower</option>
+                <option value="teen_patti">Teen Patti Live</option>
+                <option value="color">Color Trading</option>
+              </select>
+            </div>
+
+            {/* Records List */}
+            <div className="flex flex-col gap-2.5">
+              {filteredRecords.length === 0 ? (
+                <div className="text-center text-xs text-gray-500 py-12 rounded-3xl border border-gray-800 bg-[#0e1422]">
+                  अभी कोई गेम रिकॉर्ड नहीं है। खिलाड़ी के खेलते ही रिकॉर्ड यहाँ जुड़ जाएगा।
+                </div>
+              ) : (
+                filteredRecords.map((r) => (
+                  <article
+                    key={r.id}
+                    className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-lg flex flex-col sm:flex-row justify-between sm:items-center gap-3"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-white text-sm">{r.game_name}</span>
+                        <span className="font-mono text-cyan-300 font-bold">{r.player_uid}</span>
+                        {r.master_code && (
+                          <span className="font-mono text-yellow-300 text-[10px] bg-yellow-400/10 px-2 py-0.5 rounded border border-yellow-400/20">
+                            {r.master_code}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-1 text-gray-300">
+                        Stake: <b className="text-white">{r.stake_amount} 🔴</b> · Payout:{' '}
+                        <b className="text-emerald-400">{r.payout_amount} 🔴</b> · Lost:{' '}
+                        <b className="text-red-400">{r.loss_amount} 🔴</b>
+                      </p>
+                      <p className="text-[10px] text-gray-500 mt-0.5">{formatDate(r.created_at)}</p>
+                    </div>
+
+                    <div className="flex sm:flex-col items-center sm:items-end justify-between">
+                      <span
+                        className={`inline-block px-3 py-1 rounded-full text-[10px] font-black ${
+                          r.result === 'won'
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                            : 'bg-red-500/20 text-red-300 border border-red-500/40'
+                        }`}
+                      >
+                        {r.result === 'won' ? 'WON' : 'LOST'}
+                      </span>
+                      <div className="text-xs font-bold text-yellow-300 mt-1">
+                        House: {r.house_profit != null ? `${r.house_profit > 0 ? '+' : ''}${r.house_profit} 🔴` : '—'}
+                      </div>
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        )}
+
+        {/* 2. DEPOSITS TAB */}
         {activeTab === 'deposits' && canSee('deposit') && (
-          <section className="flex flex-col gap-3">
-            <div className="rounded-2xl border border-yellow-500/30 bg-gray-900 p-4">
+          <section className="flex flex-col gap-4">
+            <div className="rounded-3xl border border-yellow-500/30 bg-[#0e1422] p-5 shadow-2xl">
               <h2 className="mb-3 text-sm font-black text-yellow-300">MANUAL DIAMOND CREDIT</h2>
-              <form onSubmit={creditManualDiamonds} className="flex flex-col gap-2">
+              <form onSubmit={creditManualDiamonds} className="flex flex-col gap-3">
                 <input className={inputCls} placeholder="Player UID" value={manualUid} onChange={(e) => setManualUid(e.target.value)} required />
                 <input className={inputCls} type="number" min="1" placeholder="Red Diamonds" value={manualAmount} onChange={(e) => setManualAmount(e.target.value)} required />
                 <input className={inputCls} placeholder="Note" value={manualNote} onChange={(e) => setManualNote(e.target.value)} />
-                <button type="submit" disabled={creditingManual} className="rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3 text-xs font-black text-black disabled:opacity-50">
-                  {creditingManual ? '…' : 'Credit'}
+                <button type="submit" disabled={creditingManual} className="rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3.5 text-xs font-black text-black shadow-[0_4px_0_#b45309] active:translate-y-1 active:shadow-none disabled:opacity-50">
+                  {creditingManual ? 'Crediting…' : 'Credit Diamonds'}
                 </button>
               </form>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <h2 className="text-sm font-black text-cyan-300">DEPOSIT REQUESTS</h2>
-              <button onClick={() => void fetchDeposits()} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold">{loadingDeposits ? '…' : 'Refresh'}</button>
+              <button onClick={() => void fetchDeposits()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingDeposits ? '…' : 'Refresh'}</button>
             </div>
             {deposits.map((req) => (
-              <article key={req.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-xs">
+              <article key={req.id} className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md">
                 <p className="font-black text-cyan-300">{req.user_name} · {req.user_uid} · {req.status}</p>
                 <p className="mt-1">🔴 {req.package_diamonds} · NPR {req.amount} · {formatDate(req.created_at)}</p>
-                {req.proof_url && <a href={req.proof_url} target="_blank" rel="noreferrer" className="text-cyan-300 underline">Proof</a>}
+                {req.proof_url && <a href={req.proof_url} target="_blank" rel="noreferrer" className="text-cyan-300 underline font-bold mt-1 inline-block">View Proof</a>}
                 {(!req.status || req.status === 'Pending') && (
-                  <div className="mt-2 grid grid-cols-2 gap-2">
-                    <button onClick={() => void approveDeposit(req.id)} disabled={busyDepositId === req.id} className="rounded-xl bg-green-600 py-2 font-black text-white">Approve</button>
-                    <button onClick={() => void rejectDeposit(req.id)} disabled={busyDepositId === req.id} className="rounded-xl border border-red-500/40 py-2 font-black text-red-300">Reject</button>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button onClick={() => void approveDeposit(req.id)} disabled={busyDepositId === req.id} className="rounded-xl bg-green-600 py-2.5 font-black text-white shadow-[0_3px_0_#14532d] active:translate-y-1">Approve</button>
+                    <button onClick={() => void rejectDeposit(req.id)} disabled={busyDepositId === req.id} className="rounded-xl border border-red-500/40 bg-red-950/40 py-2.5 font-black text-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-1">Reject</button>
                   </div>
                 )}
               </article>
@@ -1209,22 +1499,23 @@ export default function AdminPage() {
           </section>
         )}
 
+        {/* 3. WITHDRAWS TAB */}
         {activeTab === 'withdraws' && canSee('withdraw') && (
-          <section className="flex flex-col gap-3">
-            <div className="flex justify-between">
+          <section className="flex flex-col gap-4">
+            <div className="flex justify-between items-center">
               <h2 className="text-sm font-black text-cyan-300">WITHDRAW REQUESTS</h2>
-              <button onClick={() => void fetchWithdraws()} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold">{loadingWithdraws ? '…' : 'Refresh'}</button>
+              <button onClick={() => void fetchWithdraws()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingWithdraws ? '…' : 'Refresh'}</button>
             </div>
             {withdraws.map((req) => (
-              <article key={req.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-xs">
+              <article key={req.id} className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md">
                 <p className="font-black text-cyan-300">{req.user_uid} · {req.status}</p>
                 <p className="mt-1">NPR {req.amount} · {req.account_name} · {req.account_no}</p>
                 {req.status === 'Processing' && (
-                  <div className="mt-2 flex flex-col gap-2">
+                  <div className="mt-3 flex flex-col gap-2">
                     <input className={inputCls} placeholder="Reject reason" value={rejectReasonDraft[String(req.id)] || ''} onChange={(e) => setRejectReasonDraft((p) => ({ ...p, [String(req.id)]: e.target.value }))} />
                     <div className="grid grid-cols-2 gap-2">
-                      <button onClick={() => void approveWithdraw(req.id)} className="rounded-xl bg-green-600 py-2 font-black text-white">Paid</button>
-                      <button onClick={() => void rejectWithdraw(req.id)} className="rounded-xl border border-red-500/40 py-2 font-black text-red-300">Reject</button>
+                      <button onClick={() => void approveWithdraw(req.id)} className="rounded-xl bg-green-600 py-2.5 font-black text-white shadow-[0_3px_0_#14532d] active:translate-y-1">Paid</button>
+                      <button onClick={() => void rejectWithdraw(req.id)} className="rounded-xl border border-red-500/40 bg-red-950/40 py-2.5 font-black text-red-300 shadow-[0_3px_0_#7f1d1d] active:translate-y-1">Reject</button>
                     </div>
                   </div>
                 )}
@@ -1233,34 +1524,34 @@ export default function AdminPage() {
           </section>
         )}
 
+        {/* 4. PASSWORD RESET */}
         {activeTab === 'password' && canSee('password_reset') && (
-          <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
+          <section className="rounded-3xl border border-gray-800 bg-[#0e1422] p-6 shadow-2xl">
             <h2 className="mb-4 text-sm font-black text-cyan-300">RESET PASSWORD</h2>
             <form onSubmit={resetPassword} className="flex flex-col gap-3">
               <input className={inputCls} placeholder="UID or Gmail" value={resetIdentifier} onChange={(e) => setResetIdentifier(e.target.value)} required />
-              <input className={inputCls} placeholder="New password optional" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} />
-              <button type="submit" disabled={resettingPassword} className="rounded-xl bg-cyan-500 py-3 text-xs font-black text-black">Reset</button>
+              <input className={inputCls} placeholder="New password (optional)" value={resetNewPassword} onChange={(e) => setResetNewPassword(e.target.value)} />
+              <button type="submit" disabled={resettingPassword} className="rounded-2xl bg-cyan-500 py-3.5 text-xs font-black text-black shadow-[0_4px_0_#0e7490] active:translate-y-1">Reset Password</button>
             </form>
-            {lastResetResult && <p className="mt-4 select-all text-lg font-black text-white">{lastResetResult.password}</p>}
+            {lastResetResult && <p className="mt-4 select-all text-lg font-black text-white font-mono bg-black/60 p-3 rounded-xl border border-gray-800">New Password: {lastResetResult.password}</p>}
           </section>
         )}
 
+        {/* 5. PLAYER SEARCH */}
         {activeTab === 'players' && canSee('player_search') && (
           <section className="flex flex-col gap-4">
-            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              <h2 className="mb-4 text-sm font-black text-cyan-300">PLAYER SEARCH</h2>
+            <div className="rounded-3xl border border-gray-800 bg-[#0e1422] p-5 shadow-2xl">
+              <h2 className="mb-3 text-sm font-black text-cyan-300">PLAYER SEARCH</h2>
               <form onSubmit={searchPlayer} className="flex flex-col gap-3 sm:flex-row">
-                <input className="min-w-0 flex-1 rounded-xl border border-gray-800 bg-black p-3 text-xs text-white outline-none" placeholder="Player UID" value={playerSearchUid} onChange={(e) => setPlayerSearchUid(e.target.value)} required />
-                <button type="submit" disabled={searchingPlayer} className="rounded-xl bg-cyan-500 px-5 py-3 text-xs font-black text-black">Search</button>
+                <input className="min-w-0 flex-1 rounded-xl border border-gray-800 bg-black/80 p-3 text-xs text-white outline-none" placeholder="Player UID" value={playerSearchUid} onChange={(e) => setPlayerSearchUid(e.target.value)} required />
+                <button type="submit" disabled={searchingPlayer} className="rounded-xl bg-cyan-500 px-6 py-3 text-xs font-black text-black shadow-[0_3px_0_#0e7490] active:translate-y-1">Search</button>
               </form>
             </div>
             {playerResult?.profile && (
-              <div className="rounded-2xl border border-cyan-500/20 bg-gray-900 p-5">
-                <h3 className="mb-3 text-sm font-black text-cyan-300">
-                  {playerResult.profile.nickname || playerResult.profile.full_name}
-                </h3>
+              <div className="rounded-3xl border border-cyan-500/20 bg-[#0e1422] p-5 shadow-xl">
+                <h3 className="mb-3 text-sm font-black text-cyan-300">{playerResult.profile.nickname || playerResult.profile.full_name}</h3>
                 <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
-                  <Stat label="Red" value={playerResult.profile.red_diamonds} color="text-red-300" />
+                  <Stat label="Red" value={playerResult.profile.red_diamonds} color="text-red-400" />
                   <Stat label="White" value={playerResult.profile.white_diamonds} color="text-cyan-300" />
                   <Stat label="Cash" value={`NPR ${playerResult.profile.winning_cash}`} color="text-green-300" />
                   <Stat label="Deposits" value={playerResult.deposit_count} color="text-yellow-300" />
@@ -1269,42 +1560,12 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
-            {playerGameStats && (
-              <div className="rounded-2xl border border-purple-500/25 bg-gray-900 p-5">
-                <h3 className="mb-2 text-sm font-black text-purple-300">GAME HISTORY</h3>
-                <p className="mb-3 text-[11px] text-gray-500">
-                  Abhi DB mein Neon Tower matches save hote hain. Baaki games baad mein.
-                </p>
-                {playerGameStats.neon_tower_summary && (
-                  <div className="mb-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                    <Stat label="Matches" value={playerGameStats.neon_tower_summary.matches} color="text-white" />
-                    <Stat label="Wins" value={playerGameStats.neon_tower_summary.wins} color="text-green-300" />
-                    <Stat label="Losses" value={playerGameStats.neon_tower_summary.losses} color="text-red-300" />
-                    <Stat label="Total Stake" value={playerGameStats.neon_tower_summary.total_stake} color="text-yellow-300" />
-                  </div>
-                )}
-                <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-                  {(playerGameStats.neon_tower || []).map((m: any) => (
-                    <div key={m.id} className="rounded-xl border border-gray-800 bg-black/40 px-3 py-2 text-xs">
-                      <div className="flex justify-between gap-2">
-                        <span className="font-bold text-cyan-300">Neon Tower</span>
-                        <span className={m.result === 'won' ? 'font-black text-green-300' : m.result === 'lost' ? 'font-black text-red-300' : 'text-gray-400'}>
-                          {m.result} · {m.net_diamonds > 0 ? '+' : ''}{m.net_diamonds} 🔴
-                        </span>
-                      </div>
-                      <p className="mt-1 text-gray-400">
-                        {m.player_1_name} vs {m.player_2_name} · Stake {m.stake_amount} · {formatDate(m.created_at)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </section>
         )}
 
+        {/* 6. CREATE PLAYER */}
         {activeTab === 'create_player' && canSee('create_player') && (
-          <section className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
+          <section className="rounded-3xl border border-gray-800 bg-[#0e1422] p-6 shadow-2xl">
             <h2 className="mb-4 text-sm font-black text-cyan-300">CREATE PLAYER</h2>
             <form onSubmit={createPlayer} className="flex flex-col gap-3">
               <input className={inputCls} placeholder="Full name" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} />
@@ -1315,34 +1576,35 @@ export default function AdminPage() {
                 <button type="button" onClick={() => setNewPlayerPassword(randomPassword())} className="rounded-xl border border-gray-700 bg-black px-3 text-[11px] font-bold">Generate</button>
               </div>
               <input className={inputCls} placeholder="Phone" value={newPlayerPhone} onChange={(e) => setNewPlayerPhone(e.target.value)} />
-              <button type="submit" disabled={creatingPlayer} className="rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 py-3 text-xs font-black text-white">Create</button>
+              <button type="submit" disabled={creatingPlayer} className="rounded-2xl bg-gradient-to-r from-pink-500 to-purple-600 py-3.5 text-xs font-black text-white shadow-[0_4px_0_#701a75] active:translate-y-1">Create Player</button>
             </form>
             {lastCreatedPlayer && (
-              <div className="mt-4 rounded-xl border border-green-500/40 bg-green-950/40 p-4 text-xs">
+              <div className="mt-4 rounded-2xl border border-green-500/40 bg-green-950/40 p-4 text-xs font-mono">
                 <p>Email: <b className="select-all text-white">{lastCreatedPlayer.email}</b></p>
                 <p>UID: <b className="select-all text-yellow-300">{lastCreatedPlayer.player_uid}</b></p>
-                <p className="mt-1 select-all text-lg font-black text-white">{lastCreatedPlayer.password}</p>
+                <p className="mt-1 text-base font-black text-white">{lastCreatedPlayer.password}</p>
               </div>
             )}
           </section>
         )}
 
+        {/* 7. TOURNAMENTS */}
         {activeTab === 'tournaments' && canSee('tournaments') && (
           <section className="flex flex-col gap-3">
-            <div className="flex justify-between">
+            <div className="flex justify-between items-center">
               <h2 className="text-sm font-black text-cyan-300">TOURNAMENTS</h2>
-              <button onClick={() => void fetchTournamentsAdmin()} className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-xs font-bold">{loadingTournaments ? '…' : 'Refresh'}</button>
+              <button onClick={() => void fetchTournamentsAdmin()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingTournaments ? '…' : 'Refresh'}</button>
             </div>
             {tournamentRows.map((t) => (
-              <article key={t.id} className="rounded-2xl border border-gray-800 bg-gray-900 p-4 text-xs">
+              <article key={t.id} className="rounded-2xl border border-gray-800 bg-[#0e1422] p-4 text-xs shadow-md">
                 <p className="font-black text-cyan-300">{t.type_label} · {t.title} · {t.status}</p>
                 <p className="mt-1">Joined {t.joined_count} · Played {t.played_count} · Fee {t.entry_fee}</p>
-                <button type="button" onClick={() => setExpandedTournamentId((id) => (id === t.id ? null : t.id))} className="mt-2 rounded-lg border border-gray-700 px-3 py-1.5 font-bold">
-                  {expandedTournamentId === t.id ? 'Hide' : 'Top 10'}
+                <button type="button" onClick={() => setExpandedTournamentId((id) => (id === t.id ? null : t.id))} className="mt-2 rounded-xl border border-gray-700 bg-black/40 px-3 py-1.5 font-bold">
+                  {expandedTournamentId === t.id ? 'Hide Ranks' : 'Top 10 Ranks'}
                 </button>
                 {expandedTournamentId === t.id &&
                   t.top_ranks.map((r) => (
-                    <p key={r.rank} className="mt-1 text-gray-300">
+                    <p key={r.rank} className="mt-1 text-gray-300 font-mono">
                       #{r.rank} {r.name} ({r.uid}) — {r.score}
                     </p>
                   ))}
@@ -1351,65 +1613,63 @@ export default function AdminPage() {
           </section>
         )}
 
+        {/* 8. CREATE MASTER (Connected to Secure Route) */}
         {activeTab === 'create_master' && roles.includes('owner') && (
           <section className="flex flex-col gap-4">
-            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
+            <div className="rounded-3xl border border-gray-800 bg-[#0e1422] p-6 shadow-2xl">
               <h2 className="mb-4 text-sm font-black text-yellow-300">CREATE MASTER ID</h2>
               <form onSubmit={createMaster} className="flex flex-col gap-3">
-                <input className={inputCls} placeholder="Full name" value={newMasterName} onChange={(e) => setNewMasterName(e.target.value)} required />
-                <input className={inputCls} type="email" placeholder="Email" value={newMasterEmail} onChange={(e) => setNewMasterEmail(e.target.value)} required />
+                <input className={inputCls} placeholder="Full name (e.g. Rajesh Sharma)" value={newMasterName} onChange={(e) => setNewMasterName(e.target.value)} required />
+                <input className={inputCls} type="email" placeholder="Email (e.g. master@arenanepal.com)" value={newMasterEmail} onChange={(e) => setNewMasterEmail(e.target.value)} required />
                 <input className={inputCls} placeholder="Phone" value={newMasterPhone} onChange={(e) => setNewMasterPhone(e.target.value)} />
                 <div className="flex gap-2">
                   <input className={`min-w-0 flex-1 ${inputCls}`} placeholder="Password optional" value={newMasterPassword} onChange={(e) => setNewMasterPassword(e.target.value)} />
                   <button type="button" onClick={() => setNewMasterPassword(randomPassword())} className="rounded-xl border border-gray-700 bg-black px-3 text-[11px] font-bold">Generate</button>
                 </div>
-                <button type="submit" disabled={creatingMaster} className="rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3 text-xs font-black text-black">Create Master</button>
+                <button type="submit" disabled={creatingMaster} className="rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3.5 text-xs font-black text-black shadow-[0_4px_0_#b45309] active:translate-y-1">
+                  {creatingMaster ? 'Creating Master…' : 'Create Master ID'}
+                </button>
               </form>
               {lastCreatedMaster && (
-                <div className="mt-4 rounded-xl border border-green-500/40 bg-green-950/40 p-4 text-xs">
-                  <p>Email: <b className="select-all text-white">{lastCreatedMaster.email}</b></p>
+                <div className="mt-4 rounded-2xl border border-green-500/40 bg-green-950/40 p-4 text-xs font-mono">
+                  <p className="font-bold text-green-300">Master Credentials:</p>
+                  <p className="mt-1">Email: <b className="select-all text-white">{lastCreatedMaster.email}</b></p>
                   <p>Code: <b className="select-all text-yellow-300">{lastCreatedMaster.master_code}</b></p>
-                  <p className="mt-1 select-all text-lg font-black text-white">{lastCreatedMaster.password}</p>
+                  <p className="mt-1 text-base font-black text-white">{lastCreatedMaster.password}</p>
                 </div>
               )}
             </div>
-            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              <div className="mb-3 flex justify-between">
+            <div className="rounded-3xl border border-gray-800 bg-[#0e1422] p-6 shadow-2xl">
+              <div className="mb-3 flex justify-between items-center">
                 <h2 className="text-sm font-black text-cyan-300">ALL MASTERS</h2>
-                <button onClick={() => void fetchMasters()} className="rounded-lg border border-gray-700 px-3 py-2 text-xs font-bold">{loadingMasters ? '…' : 'Refresh'}</button>
+                <button onClick={() => void fetchMasters()} className="rounded-xl border border-gray-700 bg-gray-900 px-3 py-1.5 text-xs font-bold">{loadingMasters ? '…' : 'Refresh'}</button>
               </div>
               {mastersList.map((m) => (
-                <div key={m.id} className="mb-2 rounded-xl border border-gray-800 bg-black/40 p-3 text-xs">
-                  <p className="font-bold text-white">{m.full_name}</p>
-                  <p className="text-yellow-300">{m.master_code}</p>
-                  <p className="text-red-300">🔴 {m.red_diamonds} · Players {m.player_count ?? 0}</p>
+                <div key={m.id} className="mb-2 rounded-2xl border border-gray-800 bg-black/40 p-3.5 text-xs flex justify-between items-center shadow-md">
+                  <div>
+                    <p className="font-bold text-white text-sm">{m.full_name}</p>
+                    <p className="text-yellow-300 font-mono font-bold">{m.master_code}</p>
+                  </div>
+                  <p className="text-base font-black text-red-400">🔴 {m.red_diamonds}</p>
                 </div>
               ))}
             </div>
           </section>
         )}
 
+        {/* 9. MASTER DEPOSIT */}
         {activeTab === 'master_deposit' && roles.includes('owner') && (
           <section className="flex flex-col gap-4">
-            <div className="rounded-2xl border border-yellow-500/30 bg-gray-900 p-5">
-              <h2 className="mb-4 text-sm font-black text-yellow-300">MASTER DEPOSIT</h2>
+            <div className="rounded-3xl border border-yellow-500/30 bg-[#0e1422] p-6 shadow-2xl">
+              <h2 className="mb-4 text-sm font-black text-yellow-300">MASTER DEPOSIT (CREDIT CHIPS)</h2>
               <form onSubmit={creditMasterDiamonds} className="flex flex-col gap-3">
                 <input className={inputCls} placeholder="MASTER-XXX or email" value={masterCreditCode} onChange={(e) => setMasterCreditCode(e.target.value)} required />
-                <input className={inputCls} type="number" min="1" placeholder="Red Diamonds" value={masterCreditAmount} onChange={(e) => setMasterCreditAmount(e.target.value)} required />
-                <input className={inputCls} placeholder="Note" value={masterCreditNote} onChange={(e) => setMasterCreditNote(e.target.value)} />
-                <button type="submit" disabled={creditingMaster} className="rounded-xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3 text-xs font-black text-black">Send to Master</button>
+                <input className={inputCls} type="number" min="1" placeholder="Red Diamonds (🔴)" value={masterCreditAmount} onChange={(e) => setMasterCreditAmount(e.target.value)} required />
+                <input className={inputCls} placeholder="Note (optional)" value={masterCreditNote} onChange={(e) => setMasterCreditNote(e.target.value)} />
+                <button type="submit" disabled={creditingMaster} className="rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 py-3.5 text-xs font-black text-black shadow-[0_4px_0_#b45309] active:translate-y-1">
+                  {creditingMaster ? 'Crediting…' : 'Send to Master'}
+                </button>
               </form>
-            </div>
-            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-5">
-              {mastersList.map((m) => (
-                <div key={m.id} className="mb-2 flex justify-between rounded-xl border border-gray-800 bg-black/40 p-3 text-xs">
-                  <div>
-                    <p className="font-bold text-white">{m.full_name}</p>
-                    <p className="text-yellow-300">{m.master_code}</p>
-                  </div>
-                  <p className="text-lg font-black text-red-300">🔴 {m.red_diamonds}</p>
-                </div>
-              ))}
             </div>
           </section>
         )}
@@ -1418,6 +1678,9 @@ export default function AdminPage() {
   );
 }
 
+// ----------------------------------------------------
+// 3D BUTTON & STAT HELPER COMPONENTS
+// ----------------------------------------------------
 function TabButton({
   active,
   onClick,
@@ -1430,10 +1693,10 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`rounded-xl py-3 text-xs font-bold transition-all ${
+      className={`rounded-2xl py-3 px-3 text-xs font-black transition-all ${
         active
-          ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20'
-          : 'border border-gray-800 bg-gray-900 text-gray-400 hover:text-white'
+          ? 'bg-gradient-to-r from-cyan-400 to-blue-500 text-black shadow-[0_4px_0_#0e7490,0_8px_16px_rgba(6,182,212,0.3)]'
+          : 'border border-gray-800 bg-[#0e1422] text-gray-300 hover:text-white shadow-[0_3px_0_#050811] active:translate-y-1'
       }`}
     >
       {children}
@@ -1443,9 +1706,9 @@ function TabButton({
 
 function Stat({ label, value, color }: { label: string; value: any; color: string }) {
   return (
-    <div className="rounded-xl border border-gray-800 bg-black/30 p-3">
-      <p className="text-[10px] text-gray-500">{label}</p>
-      <p className={`mt-1 text-sm font-black ${color}`}>{value ?? '—'}</p>
+    <div className="rounded-2xl border border-gray-800 bg-black/40 p-3 shadow-inner">
+      <p className="text-[10px] text-gray-500 font-bold uppercase">{label}</p>
+      <p className={`mt-1 text-base font-black ${color}`}>{value ?? '—'}</p>
     </div>
   );
 }
